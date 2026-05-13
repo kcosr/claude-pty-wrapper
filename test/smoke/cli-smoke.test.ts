@@ -89,6 +89,71 @@ describe("claude-pty-wrapper CLI smoke", () => {
     ]);
   });
 
+  it("emits synthetic stream-json records preserving tools, tool results, and reasoning blocks", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "claude-pty-stream-work-"));
+    const home = await mkdtemp(path.join(os.tmpdir(), "claude-pty-stream-home-"));
+    const fakeClaude = await createFakeClaudeBin();
+    const sessionId = "496765ae-4ba7-4bfa-92aa-eeeb35db5a7b";
+
+    const result = await runCli(
+      [
+        "--claude-bin",
+        fakeClaude.binPath,
+        "--cwd",
+        workspace,
+        "--session-id",
+        sessionId,
+        "--stream-json",
+        "Show records",
+      ],
+      { cwd: workspace, env: { HOME: home } },
+    );
+
+    const records = result.stdout
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(records.map((record) => [record.type, record.subtype ?? null])).toEqual([
+      ["system", "init"],
+      ["assistant", null],
+      ["assistant", null],
+      ["user", null],
+      ["assistant", null],
+      ["result", "success"],
+    ]);
+    expect(records[0]).toMatchObject({
+      type: "system",
+      subtype: "init",
+      cwd: workspace,
+      session_id: sessionId,
+    });
+    expect(records[2]).toMatchObject({
+      type: "assistant",
+      session_id: sessionId,
+      message: {
+        content: [
+          { type: "thinking", thinking: "Need a shell command." },
+          { type: "tool_use", id: "toolu_fake", name: "Bash", input: { command: "pwd" } },
+        ],
+      },
+    });
+    expect(records[3]).toMatchObject({
+      type: "user",
+      session_id: sessionId,
+      message: { content: [{ type: "tool_result", content: "tool output" }] },
+    });
+    expect(records.at(-1)).toMatchObject({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      num_turns: 3,
+      result: "first answer\n\nsecond answer",
+      stop_reason: "end_turn",
+      session_id: sessionId,
+      terminal_reason: "completed",
+    });
+  });
+
   it("resumes from the existing session file offset and does not print prior turns", async () => {
     const workspace = await mkdtemp(path.join(os.tmpdir(), "claude-pty-resume-work-"));
     const home = await mkdtemp(path.join(os.tmpdir(), "claude-pty-resume-home-"));

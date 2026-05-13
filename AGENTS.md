@@ -8,6 +8,8 @@ interactive Claude through a PTY while exposing a print-like command interface.
 - Read `README.md` for the supported CLI surface and behavior.
 - Source code lives in `src/cli/` and `src/core/`.
 - Current CLI bin entrypoint is `src/cli/main.ts`.
+- `--stream-json` is a compatibility translation of durable Claude session
+  records; keep the mapping behavior documented in `docs/stream-json.md`.
 - Tests live in `test/unit/`, `test/integration/`, and `test/smoke/`.
 - CLI smoke tests run with `npm run test:smoke`.
 

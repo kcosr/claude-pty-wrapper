@@ -16,6 +16,9 @@
 - Added opt-in live smoke tests gated behind
   `CLAUDE_PTY_WRAPPER_LIVE_SMOKE=1`, with a dedicated
   `npm run test:smoke:live` script.
+- Added `--stream-json` for a compatibility-oriented translation from durable
+  Claude session records to legacy print-mode stream JSONL, preserving tool
+  calls, tool results, and persisted reasoning-style content blocks.
 
 ### Changed
 

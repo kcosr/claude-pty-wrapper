@@ -15,8 +15,14 @@ import {
 import { tailJsonl } from "./claude-session-tail.js";
 import { ClaudePtyWrapperError } from "./errors.js";
 import { type PtyHandle, openRawPtyLog, spawnPty } from "./pty-runner.js";
+import {
+  createSyntheticStreamJsonState,
+  syntheticStreamEventForRecord,
+  syntheticStreamInitEvent,
+  syntheticStreamResultEvent,
+} from "./stream-json.js";
 
-export type OutputMode = "text" | "session-jsonl";
+export type OutputMode = "text" | "session-jsonl" | "stream-json";
 
 export interface ClaudePtyWrapperOptions {
   prompt: string;
@@ -53,7 +59,11 @@ export async function runClaudePtyWrapper(
   if (options.prompt.trim().length === 0) {
     throw new ClaudePtyWrapperError("prompt is required");
   }
-  if (options.outputMode !== "text" && options.outputMode !== "session-jsonl") {
+  if (
+    options.outputMode !== "text" &&
+    options.outputMode !== "session-jsonl" &&
+    options.outputMode !== "stream-json"
+  ) {
     throw new ClaudePtyWrapperError(`unsupported output mode: ${options.outputMode}`);
   }
 
@@ -106,6 +116,8 @@ export async function runClaudePtyWrapper(
     sessionPath,
     startOffset,
     outputMode: options.outputMode,
+    cwd,
+    sessionId,
     signal: controller.signal,
     streams,
   }).then<RaceResult, RaceResult>(
@@ -178,11 +190,14 @@ async function streamTurnFromSessionFile(options: {
   sessionPath: string;
   startOffset: number;
   outputMode: OutputMode;
+  cwd: string;
+  sessionId: string;
   signal: AbortSignal;
   streams: RunStreams;
 }): Promise<void> {
   let inTurn = false;
   let emittedText = "";
+  const streamJsonState = createSyntheticStreamJsonState(options.sessionId);
 
   for await (const { line, record } of tailJsonl({
     path: options.sessionPath,
@@ -192,14 +207,50 @@ async function streamTurnFromSessionFile(options: {
     if (options.outputMode === "session-jsonl") {
       options.streams.stdout.write(`${line}\n`);
     }
+    if (
+      options.outputMode === "stream-json" &&
+      !streamJsonState.emittedInit &&
+      record.type === "system" &&
+      record.subtype === "init"
+    ) {
+      writeJsonLine(
+        options.streams,
+        syntheticStreamInitEvent({
+          cwd: options.cwd,
+          sessionId: options.sessionId,
+          source: record,
+        }),
+      );
+      streamJsonState.emittedInit = true;
+      continue;
+    }
 
     if (realClaudeUserText(record) !== null) {
       inTurn = true;
+      if (options.outputMode === "stream-json" && !streamJsonState.emittedInit) {
+        writeJsonLine(
+          options.streams,
+          syntheticStreamInitEvent({
+            cwd: options.cwd,
+            sessionId: options.sessionId,
+            source: null,
+          }),
+        );
+        streamJsonState.emittedInit = true;
+      }
       continue;
     }
 
     if (!inTurn) {
       continue;
+    }
+
+    if (options.outputMode === "stream-json") {
+      const event = syntheticStreamEventForRecord(streamJsonState, record);
+      if (event !== null) {
+        writeJsonLine(options.streams, event);
+        continue;
+      }
     }
 
     const assistantText = claudeAssistantRecordText(record);
@@ -215,9 +266,16 @@ async function streamTurnFromSessionFile(options: {
     }
 
     if (isClaudeTurnTerminalRecord(record)) {
+      if (options.outputMode === "stream-json") {
+        writeJsonLine(options.streams, syntheticStreamResultEvent(streamJsonState, record));
+      }
       return;
     }
   }
+}
+
+function writeJsonLine(streams: RunStreams, value: Record<string, unknown>): void {
+  streams.stdout.write(`${JSON.stringify(value)}\n`);
 }
 
 async function closeClaudePty(handle: PtyHandle): Promise<void> {

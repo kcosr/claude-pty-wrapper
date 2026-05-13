@@ -1,5 +1,7 @@
 # claude-pty-wrapper
 
+> **Warning: Untested vibe slop**
+
 `claude-pty-wrapper` runs interactive Claude through a PTY while exposing a
 print-like CLI that streams assistant text from Claude's durable session JSONL.
 
@@ -21,6 +23,16 @@ claude-pty-wrapper --session-jsonl "Summarize this repository"
 turn. This is useful for diagnostics and downstream tooling.
 
 ```bash
+claude-pty-wrapper --stream-json "Summarize this repository"
+```
+
+`--stream-json` emits a compatibility-oriented JSONL stream resembling
+`claude -p --verbose --output-format stream-json`. It preserves persisted
+assistant content blocks, including tool calls and reasoning-style blocks, but
+cannot synthesize runtime-only metadata that Claude does not write to the
+durable session file. See [docs/stream-json.md](docs/stream-json.md).
+
+```bash
 claude-pty-wrapper --resume 18a18377-217d-4b29-9a68-c70a89b79330 -p "Continue"
 ```
 
@@ -32,7 +44,7 @@ so output is scoped to the resumed turn.
 ```text
 -p, --print                     Extract assistant text (default)
 --session-jsonl                 Emit appended raw Claude session JSONL
---stream-json                   Reserved for future synthetic stream output
+--stream-json                   Emit synthetic print-mode stream JSONL
 --resume <session-id>           Resume an existing Claude session
 --session-id <uuid>             Use an explicit session id for a fresh run
 --cwd <dir>                     Working directory for Claude and path lookup

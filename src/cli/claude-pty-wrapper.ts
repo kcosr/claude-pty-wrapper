@@ -14,7 +14,7 @@ export function configureProgram(): Command {
     .argument("[prompt]", "prompt to pass to Claude")
     .option("-p, --print", "extract assistant text from Claude session JSONL")
     .option("--session-jsonl", "emit raw appended Claude session JSONL records")
-    .option("--stream-json", "reserved for future synthetic stream-json output")
+    .option("--stream-json", "emit synthetic Claude print-mode stream-json records")
     .option("--resume <session-id>", "resume a Claude session")
     .option("--session-id <uuid>", "use a specific session ID for a fresh run")
     .option("--cwd <dir>", "working directory for Claude", process.cwd())
@@ -32,10 +32,11 @@ export function configureProgram(): Command {
     .option("--debug", "print wrapper diagnostics and raw PTY output to stderr")
     .action(async (prompt: string | undefined, options) => {
       await run(async () => {
-        if (options.streamJson) {
-          throw new ClaudePtyWrapperError("--stream-json is reserved for future implementation");
-        }
-        const outputMode = resolveOutputMode(Boolean(options.print), Boolean(options.sessionJsonl));
+        const outputMode = resolveOutputMode(
+          Boolean(options.print),
+          Boolean(options.sessionJsonl),
+          Boolean(options.streamJson),
+        );
         const code = await runClaudePtyWrapper({
           prompt: prompt ?? "",
           outputMode,
@@ -57,9 +58,13 @@ export function configureProgram(): Command {
   return root;
 }
 
-function resolveOutputMode(print: boolean, sessionJsonl: boolean): OutputMode {
-  if (print && sessionJsonl) {
+function resolveOutputMode(print: boolean, sessionJsonl: boolean, streamJson: boolean): OutputMode {
+  const selected = [print, sessionJsonl, streamJson].filter(Boolean).length;
+  if (selected > 1) {
     throw new ClaudePtyWrapperError("choose only one output mode");
+  }
+  if (streamJson) {
+    return "stream-json";
   }
   return sessionJsonl ? "session-jsonl" : "text";
 }

@@ -18,6 +18,12 @@ Emit durable session records instead of extracted text:
 claude-pty-wrapper --session-jsonl "List changed files"
 ```
 
+Emit a legacy-like stream JSONL translation:
+
+```bash
+claude-pty-wrapper --stream-json "List changed files"
+```
+
 Resume an existing Claude session:
 
 ```bash
