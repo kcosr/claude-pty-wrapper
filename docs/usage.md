@@ -1,5 +1,11 @@
 # Usage
 
+Run Claude's normal interactive mode:
+
+```bash
+claude-pty-wrapper "Explain the current repository"
+```
+
 Run a fresh print-like turn:
 
 ```bash
@@ -34,13 +40,13 @@ Emit a single Claude-shaped result object:
 claude-pty-wrapper -p --output-format json "List changed files"
 ```
 
-Until interactive passthrough is implemented, a bare prompt without `-p` is
-rejected so it does not masquerade as Claude's interactive default.
+A bare prompt without wrapper output flags passes through to Claude's normal
+interactive behavior.
 
 Resume an existing Claude session:
 
 ```bash
-claude-pty-wrapper --resume 18a18377-217d-4b29-9a68-c70a89b79330 "Continue"
+claude-pty-wrapper --resume 18a18377-217d-4b29-9a68-c70a89b79330 -p "Continue"
 ```
 
 Run opt-in live smoke tests against the installed Claude binary:

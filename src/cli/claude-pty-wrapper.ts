@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command, Option } from "commander";
 import { ClaudePtyWrapperError } from "../core/errors.js";
+import { runClaudePassthrough } from "../core/passthrough.js";
 import { type OutputMode, runClaudePtyWrapper } from "../core/wrapper.js";
 
 type CommandOptions = {
@@ -10,7 +11,7 @@ type CommandOptions = {
   outputFormat: "text" | "json" | "stream-json";
   inputFormat: "text" | "stream-json";
   sessionJsonl?: boolean;
-  resume?: string;
+  resume?: string | boolean;
   sessionId?: string;
   cwd: string;
   claudeBin: string;
@@ -24,7 +25,42 @@ type CommandOptions = {
   continue?: boolean;
   includePartialMessages?: boolean;
   includeHookEvents?: boolean;
-  [key: string]: unknown;
+  permissionMode?: string;
+  appendSystemPrompt?: string;
+  systemPrompt?: string;
+  allowedTools?: string[];
+  disallowedTools?: string[];
+  tools?: string[];
+  mcpConfig?: string[];
+  strictMcpConfig?: boolean;
+  mcpDebug?: boolean;
+  debug?: string | boolean;
+  verbose?: boolean;
+  agents?: string;
+  agent?: string;
+  settingSources?: string;
+  settings?: string;
+  pluginDir?: string[];
+  pluginUrl?: string[];
+  file?: string[];
+  addDir?: string[];
+  betas?: string[];
+  fallbackModel?: string;
+  jsonSchema?: string;
+  maxBudgetUsd?: string;
+  remoteControl?: string | boolean;
+  remoteControlSessionNamePrefix?: string;
+  worktree?: string | boolean;
+  fromPr?: string | boolean;
+  chrome?: boolean;
+  ide?: boolean;
+  bare?: boolean;
+  brief?: boolean;
+  disableSlashCommands?: boolean;
+  forkSession?: boolean;
+  tmux?: string | boolean;
+  sessionPersistence?: boolean;
+  replayUserMessages?: boolean;
 };
 
 export function configureProgram(): Command {
@@ -46,8 +82,8 @@ export function configureProgram(): Command {
         .default("text"),
     )
     .option("--session-jsonl", "wrapper diagnostic: emit raw appended Claude session JSONL records")
-    .option("--resume <session-id>", "resume a Claude session")
-    .option("-c, --continue", "unsupported: continue the most recent conversation")
+    .option("-r, --resume [session-id]", "resume a Claude session")
+    .option("-c, --continue", "continue the most recent conversation")
     .option("--session-id <uuid>", "use a specific session ID for a fresh run")
     .option("--cwd <dir>", "working directory for Claude", process.cwd())
     .option("--claude-bin <path>", "Claude binary", process.env.CLAUDE_BIN ?? "claude")
@@ -109,13 +145,22 @@ export function configureProgram(): Command {
     )
     .option(
       "--include-hook-events",
-      "unsupported: Claude stream-json hook events are not available from session files",
+      "forward in passthrough mode; unsupported by wrapper stream translation",
     )
     .option("--raw-pty-log <file>", "write raw PTY output to a diagnostics file")
     .option("--wrapper-debug", "print wrapper diagnostics and raw PTY output to stderr")
     .action(async (prompt: string | undefined, options: CommandOptions) => {
       await run(async () => {
         validateCommandOptions(root, options);
+        if (!wrapperModeRequested(root, options)) {
+          const code = await runClaudePassthrough({
+            claudeBin: options.claudeBin,
+            cwd: options.cwd,
+            args: buildPassthroughClaudeArgs(root, options, prompt),
+          });
+          process.exitCode = code;
+          return;
+        }
         const resolvedPrompt = await resolvePrompt(prompt, options.inputFormat);
         const outputMode = resolveOutputMode(root, options);
         const code = await runClaudePtyWrapper({
@@ -124,13 +169,13 @@ export function configureProgram(): Command {
           cwd: options.cwd,
           claudeBin: options.claudeBin,
           timeoutMs: options.timeout * 1_000,
-          resumeSessionId: options.resume,
+          resumeSessionId: typeof options.resume === "string" ? options.resume : undefined,
           sessionId: options.sessionId,
           model: options.model,
           effort: options.effort,
           name: options.name,
           dangerouslySkipPermissions: options.dangerouslySkipPermissions,
-          claudeArgs: buildClaudePassThroughArgs(root, options),
+          claudeArgs: buildSharedClaudeArgs(root, options, { includeRuntimeOutputFlags: false }),
           rawPtyLog: options.rawPtyLog,
           wrapperDebug: options.wrapperDebug,
         });
@@ -142,17 +187,22 @@ export function configureProgram(): Command {
 
 function validateCommandOptions(root: Command, options: CommandOptions): void {
   const outputFormatWasSet = root.getOptionValueSource("outputFormat") === "cli";
-  if (options.continue) {
+  const inputFormatWasSet = root.getOptionValueSource("inputFormat") === "cli";
+  const wrapperMode = wrapperModeRequested(root, options);
+  if (!wrapperMode) {
+    rejectWrapperOnlyPassthroughOption(root, options);
+  }
+  if (options.continue && wrapperMode) {
     throw new ClaudePtyWrapperError(
       "--continue is not supported by the PTY wrapper; use --resume <session-id>",
     );
   }
-  if (options.inputFormat !== "text") {
+  if (options.inputFormat !== "text" && wrapperMode) {
     throw new ClaudePtyWrapperError(
       "--input-format stream-json is not supported by the PTY wrapper yet",
     );
   }
-  if (options.includeHookEvents) {
+  if (options.includeHookEvents && wrapperMode) {
     throw new ClaudePtyWrapperError(
       "--include-hook-events is only available from Claude runtime stream-json",
     );
@@ -163,14 +213,36 @@ function validateCommandOptions(root: Command, options: CommandOptions): void {
   if (options.sessionJsonl && outputFormatWasSet) {
     throw new ClaudePtyWrapperError("choose either --session-jsonl or --output-format");
   }
-  if (!options.print && !options.sessionJsonl) {
-    if (outputFormatWasSet) {
-      throw new ClaudePtyWrapperError("--output-format requires -p/--print");
-    }
-    throw new ClaudePtyWrapperError(
-      "interactive passthrough is not implemented yet; use -p/--print for wrapper output",
-    );
+  if (!options.print && outputFormatWasSet) {
+    throw new ClaudePtyWrapperError("--output-format requires -p/--print");
   }
+  if (!options.print && inputFormatWasSet) {
+    throw new ClaudePtyWrapperError("--input-format requires -p/--print");
+  }
+  if (wrapperMode && options.resume === true) {
+    throw new ClaudePtyWrapperError("--resume requires a session id in wrapper mode");
+  }
+}
+
+function rejectWrapperOnlyPassthroughOption(root: Command, options: CommandOptions): void {
+  if (root.getOptionValueSource("timeout") === "cli") {
+    throw new ClaudePtyWrapperError("--timeout requires -p/--print or --session-jsonl");
+  }
+  if (options.rawPtyLog) {
+    throw new ClaudePtyWrapperError("--raw-pty-log requires -p/--print or --session-jsonl");
+  }
+  if (options.wrapperDebug) {
+    throw new ClaudePtyWrapperError("--wrapper-debug requires -p/--print or --session-jsonl");
+  }
+}
+
+function wrapperModeRequested(root: Command, options: CommandOptions): boolean {
+  return (
+    Boolean(options.print) ||
+    Boolean(options.sessionJsonl) ||
+    root.getOptionValueSource("outputFormat") === "cli" ||
+    root.getOptionValueSource("inputFormat") === "cli"
+  );
 }
 
 function resolveOutputMode(_root: Command, options: CommandOptions): OutputMode {
@@ -180,7 +252,32 @@ function resolveOutputMode(_root: Command, options: CommandOptions): OutputMode 
   return options.outputFormat;
 }
 
-function buildClaudePassThroughArgs(root: Command, options: CommandOptions): string[] {
+function buildPassthroughClaudeArgs(
+  root: Command,
+  options: CommandOptions,
+  prompt: string | undefined,
+): string[] {
+  const args: string[] = [];
+  addOptionalString(args, "--resume", options.resume);
+  addBoolean(args, "-c", options.continue);
+  addString(args, "--session-id", options.sessionId);
+  addString(args, "--model", options.model);
+  addString(args, "--effort", options.effort);
+  addString(args, "--name", options.name);
+  addBoolean(args, "--dangerously-skip-permissions", options.dangerouslySkipPermissions);
+  args.push(...buildSharedClaudeArgs(root, options, { includeRuntimeOutputFlags: true }));
+  if (prompt !== undefined) {
+    args.push("--");
+    args.push(prompt);
+  }
+  return args;
+}
+
+function buildSharedClaudeArgs(
+  root: Command,
+  options: CommandOptions,
+  settings: { includeRuntimeOutputFlags: boolean },
+): string[] {
   const args: string[] = [];
   addString(args, "--permission-mode", options.permissionMode);
   addString(args, "--append-system-prompt", options.appendSystemPrompt);
@@ -223,6 +320,10 @@ function buildClaudePassThroughArgs(root: Command, options: CommandOptions): str
     optionWasSet(root, "sessionPersistence") && options.sessionPersistence === false,
   );
   addBoolean(args, "--replay-user-messages", options.replayUserMessages);
+  if (settings.includeRuntimeOutputFlags) {
+    addBoolean(args, "--include-partial-messages", options.includePartialMessages);
+    addBoolean(args, "--include-hook-events", options.includeHookEvents);
+  }
   return args;
 }
 

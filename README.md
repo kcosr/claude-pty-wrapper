@@ -1,11 +1,19 @@
 # claude-pty-wrapper
 
-> **Warning: Untested vibe slop**
+> **Warning:** Experimental wrapper. Test against your workflow before relying
+> on it for automation.
 
 `claude-pty-wrapper` runs interactive Claude through a PTY while exposing a
 print-like CLI that streams assistant text from Claude's durable session JSONL.
 
 ## Usage
+
+```bash
+claude-pty-wrapper "Summarize this repository"
+```
+
+Without wrapper output flags, `claude-pty-wrapper` passes through to Claude's
+normal interactive mode using the current terminal.
 
 ```bash
 claude-pty-wrapper -p "Summarize this repository"
@@ -76,9 +84,8 @@ are passed through before the prompt. Additional wrapper-only flags are `--cwd`,
 `--include-partial-messages` is accepted as a no-op for compatibility with
 tools that pass it with `--output-format stream-json`.
 
-Until transparent interactive passthrough is implemented, use `-p/--print` for
-text, JSON, and stream JSON output. A bare prompt without `-p` fails instead of
-silently behaving differently from Claude's interactive default.
+Use `-p/--print` for wrapper-managed text, JSON, and stream JSON output. A bare
+prompt without wrapper output flags uses Claude's normal interactive behavior.
 
 ## Development
 

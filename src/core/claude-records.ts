@@ -16,6 +16,7 @@ export function extractClaudeText(content: unknown): string {
   let combined = "";
   for (const item of claudeContentBlocks(content)) {
     if (typeof item.text === "string") {
+      combined += streamBoundarySeparator(combined, item.text);
       combined += item.text;
     }
   }
@@ -37,6 +38,8 @@ export function realClaudeUserText(record: Record<string, unknown>): string | nu
   }
   const text = extractClaudeText(content);
   const trimmed = text.trim();
+  // Claude persists internal task-runner wakeups as user-looking records; they
+  // should not start a wrapper output turn.
   if (trimmed.length === 0 || trimmed.startsWith("<task-notification>")) {
     return null;
   }

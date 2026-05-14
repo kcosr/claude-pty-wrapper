@@ -17,6 +17,7 @@ import { ClaudePtyWrapperError } from "./errors.js";
 import { type PtyHandle, openRawPtyLog, spawnPty } from "./pty-runner.js";
 import {
   createSyntheticStreamJsonState,
+  noteSyntheticUserTurn,
   syntheticStreamEventForRecord,
   syntheticStreamInitEvent,
   syntheticStreamResultEvent,
@@ -130,32 +131,35 @@ export async function runClaudePtyWrapper(
   const exitPromise = ptyHandle.waitForExit().then<RaceResult>(() => ({ type: "exit" }));
   const timeoutPromise = delay(options.timeoutMs).then<RaceResult>(() => ({ type: "timeout" }));
 
-  const first = await Promise.race([tailPromise, exitPromise, timeoutPromise]);
-  let exitCode: number;
-  if (first.type === "complete") {
-    await closeClaudePty(ptyHandle);
-    exitCode = 0;
-  } else if (first.type === "exit") {
-    const graceResult = await Promise.race([tailPromise, delay(1_000).then(() => null)]);
-    if (graceResult?.type === "complete") {
+  try {
+    const first = await Promise.race([tailPromise, exitPromise, timeoutPromise]);
+    let exitCode: number;
+    if (first.type === "complete") {
+      await closeClaudePty(ptyHandle);
       exitCode = 0;
-    } else if (graceResult?.type === "tail-error") {
-      throw asWrapperError(graceResult.error);
+    } else if (first.type === "exit") {
+      const graceResult = await Promise.race([tailPromise, delay(2_000).then(() => null)]);
+      if (graceResult?.type === "complete") {
+        exitCode = 0;
+      } else if (graceResult?.type === "tail-error") {
+        throw asWrapperError(graceResult.error);
+      } else {
+        debug(options, streams, "Claude exited before a turn_duration record was observed");
+        exitCode = 1;
+      }
+    } else if (first.type === "timeout") {
+      debug(options, streams, `timed out after ${options.timeoutMs}ms`);
+      await terminateClaudePty(ptyHandle);
+      exitCode = 2;
     } else {
-      debug(options, streams, "Claude exited before a turn_duration record was observed");
-      exitCode = 1;
+      await terminateClaudePty(ptyHandle);
+      throw asWrapperError(first.error);
     }
-  } else if (first.type === "timeout") {
-    debug(options, streams, `timed out after ${options.timeoutMs}ms`);
-    await terminateClaudePty(ptyHandle);
-    exitCode = 2;
-  } else {
-    throw asWrapperError(first.error);
+    return exitCode;
+  } finally {
+    controller.abort();
+    rawLog?.end();
   }
-
-  controller.abort();
-  rawLog?.end();
-  return exitCode;
 }
 
 export function buildClaudeArgs(options: {
@@ -187,6 +191,7 @@ export function buildClaudeArgs(options: {
     args.push("--dangerously-skip-permissions");
   }
   args.push(...(options.claudeArgs ?? []));
+  args.push("--");
   args.push(options.prompt);
   return args;
 }
@@ -232,6 +237,9 @@ async function streamTurnFromSessionFile(options: {
 
     if (realClaudeUserText(record) !== null) {
       inTurn = true;
+      if (options.outputMode === "stream-json" || options.outputMode === "json") {
+        noteSyntheticUserTurn(structuredState, record);
+      }
       if (
         (options.outputMode === "stream-json" || options.outputMode === "json") &&
         !structuredState.emittedInit
@@ -298,6 +306,8 @@ function writeJsonLine(streams: RunStreams, value: Record<string, unknown>): voi
 
 async function closeClaudePty(handle: PtyHandle): Promise<void> {
   try {
+    // Claude is running in an interactive PTY; EOT asks it to leave the input
+    // prompt after we have already observed the durable turn completion marker.
     handle.write("\x04");
     await delay(250);
     handle.write("\x04");

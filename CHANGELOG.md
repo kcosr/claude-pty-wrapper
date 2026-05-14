@@ -21,6 +21,8 @@
   preserving tool calls, tool results, and persisted reasoning-style content
   blocks.
 - Added `--output-format json` for a single Claude-shaped result object.
+- Added transparent interactive passthrough for invocations without wrapper
+  output flags.
 
 ### Changed
 
@@ -28,9 +30,14 @@
   `--wrapper-debug`, keeping `--debug` available for Claude.
 - Accepted `--include-partial-messages` as a no-op compatibility flag for
   stream-json callers.
-- Required `-p/--print` for text, JSON, and stream JSON wrapper output until
-  transparent interactive passthrough is implemented.
+- Required `-p/--print` for text, JSON, and stream JSON wrapper output so bare
+  prompts can follow Claude's interactive default.
 
 ### Fixed
+
+- Fixed PTY cleanup when session tailing fails before Claude exits.
+- Improved stream-json parity by counting user turns, omitting null
+  `parent_tool_use_id` fields, and carrying persisted stop reasons when
+  available.
 
 ### Removed

@@ -1,19 +1,35 @@
-import { extractClaudeText, isRecord, streamBoundarySeparator } from "./claude-records.js";
+import {
+  extractClaudeText,
+  isRecord,
+  realClaudeUserText,
+  streamBoundarySeparator,
+} from "./claude-records.js";
 
 export interface SyntheticStreamJsonState {
   sessionId: string;
   resultText: string;
-  assistantTurns: number;
+  userTurns: number;
   emittedInit: boolean;
+  stopReason: string | null;
 }
 
 export function createSyntheticStreamJsonState(sessionId: string): SyntheticStreamJsonState {
   return {
     sessionId,
     resultText: "",
-    assistantTurns: 0,
+    userTurns: 0,
     emittedInit: false,
+    stopReason: null,
   };
+}
+
+export function noteSyntheticUserTurn(
+  state: SyntheticStreamJsonState,
+  record: Record<string, unknown>,
+): void {
+  if (realClaudeUserText(record) !== null) {
+    state.userTurns++;
+  }
 }
 
 export function syntheticStreamInitEvent(params: {
@@ -22,7 +38,6 @@ export function syntheticStreamInitEvent(params: {
   source: Record<string, unknown> | null;
 }): Record<string, unknown> {
   const event = copyKnownSourceFields(params.source, [
-    "cwd",
     "tools",
     "mcp_servers",
     "model",
@@ -39,12 +54,13 @@ export function syntheticStreamInitEvent(params: {
     "memory_paths",
     "fast_mode_state",
   ]);
+  const cwd = stringValue(params.source?.cwd) ?? params.cwd;
   return {
+    ...event,
     type: "system",
     subtype: "init",
-    cwd: typeof event.cwd === "string" ? event.cwd : params.cwd,
+    cwd,
     session_id: params.sessionId,
-    ...event,
   };
 }
 
@@ -63,12 +79,15 @@ export function syntheticStreamEventForRecord(
       state.resultText += separator;
       state.resultText += text;
     }
-    state.assistantTurns++;
+    if (isRecord(record.message)) {
+      state.stopReason = stringValue(record.message.stop_reason) ?? state.stopReason;
+    }
+    const parentToolUseId = stringValue(record.parent_tool_use_id ?? record.parentToolUseId);
     return withCommonStreamFields(
       {
         type: "assistant",
         message: record.message,
-        parent_tool_use_id: stringOrNull(record.parent_tool_use_id ?? record.parentToolUseId),
+        ...(parentToolUseId !== null ? { parent_tool_use_id: parentToolUseId } : {}),
       },
       record,
       state.sessionId,
@@ -80,11 +99,12 @@ export function syntheticStreamEventForRecord(
     isRecord(record.message) &&
     isAllToolResultContent(record.message.content)
   ) {
+    const parentToolUseId = stringValue(record.parent_tool_use_id ?? record.parentToolUseId);
     return withCommonStreamFields(
       {
         type: "user",
         message: record.message,
-        parent_tool_use_id: stringOrNull(record.parent_tool_use_id ?? record.parentToolUseId),
+        ...(parentToolUseId !== null ? { parent_tool_use_id: parentToolUseId } : {}),
         ...(record.tool_use_result !== undefined || record.toolUseResult !== undefined
           ? { tool_use_result: record.tool_use_result ?? record.toolUseResult }
           : {}),
@@ -110,17 +130,23 @@ export function syntheticStreamResultEvent(
   terminalRecord: Record<string, unknown>,
 ): Record<string, unknown> {
   const durationMs = numberValue(terminalRecord.duration_ms ?? terminalRecord.durationMs);
+  const stopReason =
+    stringValue(terminalRecord.stop_reason ?? terminalRecord.stopReason) ??
+    state.stopReason ??
+    "end_turn";
+  const terminalReason =
+    stringValue(terminalRecord.terminal_reason ?? terminalRecord.terminalReason) ?? "completed";
   const result: Record<string, unknown> = {
     type: "result",
     subtype: "success",
     is_error: false,
     api_error_status: null,
-    num_turns: state.assistantTurns,
+    num_turns: state.userTurns,
     result: state.resultText,
-    stop_reason: "end_turn",
+    stop_reason: stopReason,
     session_id: state.sessionId,
     permission_denials: [],
-    terminal_reason: "completed",
+    terminal_reason: terminalReason,
   };
 
   if (durationMs !== null) {
@@ -179,10 +205,6 @@ function isAllToolResultContent(content: unknown): boolean {
 
 function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function stringOrNull(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
 }
 
 function numberValue(value: unknown): number | null {

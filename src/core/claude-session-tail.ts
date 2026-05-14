@@ -8,6 +8,7 @@ export interface TailJsonlOptions {
   startOffset: number;
   signal: AbortSignal;
   pollMs?: number;
+  maxLineLength?: number;
 }
 
 export interface TailJsonlRecord {
@@ -20,6 +21,7 @@ export async function* tailJsonl(options: TailJsonlOptions): AsyncGenerator<Tail
   let offset = options.startOffset;
   let buffer = "";
   const pollMs = options.pollMs ?? 50;
+  const maxLineLength = options.maxLineLength ?? 16 * 1024 * 1024;
 
   while (!options.signal.aborted) {
     const size = await currentSize(options.path);
@@ -31,6 +33,11 @@ export async function* tailJsonl(options: TailJsonlOptions): AsyncGenerator<Tail
     const chunk = await readRange(options.path, offset, size);
     offset = size;
     buffer += chunk;
+    if (buffer.length > maxLineLength) {
+      throw new ClaudePtyWrapperError(
+        `failed to parse Claude session history ${basename(options.path)}: line exceeds ${maxLineLength} bytes`,
+      );
+    }
 
     let newlineIndex: number;
     while ((newlineIndex = buffer.indexOf("\n")) >= 0) {
@@ -85,16 +92,19 @@ async function delay(ms: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) {
     return;
   }
+  let onAbort: (() => void) | null = null;
   await new Promise<void>((resolve) => {
     const timeout = setTimeout(resolve, ms);
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timeout);
-        resolve();
-      },
-      { once: true },
-    );
+    onAbort = () => {
+      clearTimeout(timeout);
+      resolve();
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    timeout.unref();
+  }).finally(() => {
+    if (onAbort !== null) {
+      signal.removeEventListener("abort", onAbort);
+    }
   });
 }
 

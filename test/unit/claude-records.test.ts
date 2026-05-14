@@ -47,7 +47,7 @@ describe("Claude session records", () => {
           ],
         },
       }),
-    ).toBe("AB");
+    ).toBe("A\n\nB");
     expect(claudeAssistantRecordText({ type: "assistant", isSidechain: true })).toBeNull();
     expect(
       isClaudeTurnTerminalRecord({

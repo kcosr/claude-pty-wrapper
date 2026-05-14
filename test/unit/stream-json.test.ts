@@ -26,20 +26,19 @@ describe("synthetic stream-json translation", () => {
   it("preserves assistant content blocks and tool results", () => {
     const state = createSyntheticStreamJsonState("18a18377-217d-4b29-9a68-c70a89b79330");
 
-    expect(
-      syntheticStreamEventForRecord(state, {
-        type: "assistant",
-        sessionId: state.sessionId,
-        uuid: "assistant-uuid",
-        message: {
-          role: "assistant",
-          content: [
-            { type: "thinking", thinking: "reasoning" },
-            { type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "pwd" } },
-          ],
-        },
-      }),
-    ).toMatchObject({
+    const assistantEvent = syntheticStreamEventForRecord(state, {
+      type: "assistant",
+      sessionId: state.sessionId,
+      uuid: "assistant-uuid",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "reasoning" },
+          { type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "pwd" } },
+        ],
+      },
+    });
+    expect(assistantEvent).toMatchObject({
       type: "assistant",
       session_id: state.sessionId,
       uuid: "assistant-uuid",
@@ -50,6 +49,7 @@ describe("synthetic stream-json translation", () => {
         ],
       },
     });
+    expect(assistantEvent).not.toHaveProperty("parent_tool_use_id");
 
     expect(
       syntheticStreamEventForRecord(state, {
@@ -73,6 +73,7 @@ describe("synthetic stream-json translation", () => {
 
   it("emits a final result record with combined assistant text from real durable shapes", () => {
     const state = createSyntheticStreamJsonState("18a18377-217d-4b29-9a68-c70a89b79330");
+    state.userTurns++;
     syntheticStreamEventForRecord(state, {
       type: "assistant",
       sessionId: state.sessionId,
@@ -131,6 +132,7 @@ describe("synthetic stream-json translation", () => {
         id: "msg_3",
         model: "claude-sonnet-4-6",
         role: "assistant",
+        stop_reason: "max_tokens",
         type: "message",
         usage: { input_tokens: 1, output_tokens: 1 },
         content: [{ type: "text", text: "two" }],
@@ -145,17 +147,18 @@ describe("synthetic stream-json translation", () => {
         durationMs: 42,
         messageCount: 3,
         isSidechain: false,
+        terminalReason: "max_tokens",
       }),
     ).toMatchObject({
       type: "result",
       subtype: "success",
       is_error: false,
       duration_ms: 42,
-      num_turns: 3,
+      num_turns: 1,
       result: "one\n\ntwo",
-      stop_reason: "end_turn",
+      stop_reason: "max_tokens",
       session_id: state.sessionId,
-      terminal_reason: "completed",
+      terminal_reason: "max_tokens",
     });
   });
 

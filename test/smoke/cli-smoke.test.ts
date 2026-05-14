@@ -78,6 +78,7 @@ describe("claude-pty-wrapper CLI smoke", () => {
       "/tmp/plugin-a",
       "--plugin-dir",
       "/tmp/plugin-b",
+      "--",
       "Summarize this repository",
     ]);
   });
@@ -177,7 +178,7 @@ describe("claude-pty-wrapper CLI smoke", () => {
       type: "result",
       subtype: "success",
       is_error: false,
-      num_turns: 3,
+      num_turns: 1,
       result: "first answer\n\nsecond answer",
       stop_reason: "end_turn",
       session_id: sessionId,
@@ -295,19 +296,106 @@ describe("claude-pty-wrapper CLI smoke", () => {
     expect(result.stdout).toBe("");
   });
 
-  it("rejects bare prompts until interactive passthrough is implemented", async () => {
-    const workspace = await mkdtemp(path.join(os.tmpdir(), "claude-pty-bare-work-"));
-    const home = await mkdtemp(path.join(os.tmpdir(), "claude-pty-bare-home-"));
+  it("terminates Claude and reports tail errors", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "claude-pty-tail-error-work-"));
+    const home = await mkdtemp(path.join(os.tmpdir(), "claude-pty-tail-error-home-"));
     const fakeClaude = await createFakeClaudeBin();
+    const sessionId = "4845afe2-511f-4199-9f04-eec7f872bb61";
+    await writeFile(fakeClaude.modePath, "malformed\n", "utf8");
 
     const result = await runCli(
-      ["--claude-bin", fakeClaude.binPath, "--cwd", workspace, "Start interactively"],
+      [
+        "--claude-bin",
+        fakeClaude.binPath,
+        "--cwd",
+        workspace,
+        "--session-id",
+        sessionId,
+        "-p",
+        "Break the session",
+      ],
       { cwd: workspace, env: { HOME: home }, reject: false },
     );
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("interactive passthrough is not implemented yet");
+    expect(result.stderr).toContain("invalid JSON");
+    await expect(readFile(fakeClaude.signalPath, "utf8")).resolves.toBe("SIGTERM\n");
+  });
+
+  it("passes bare prompts through to Claude without wrapper output handling", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "claude-pty-bare-work-"));
+    const home = await mkdtemp(path.join(os.tmpdir(), "claude-pty-bare-home-"));
+    const fakeClaude = await createFakeClaudeBin();
+    await writeFile(fakeClaude.modePath, "passthrough\n", "utf8");
+
+    const result = await runCli(
+      [
+        "--claude-bin",
+        fakeClaude.binPath,
+        "--cwd",
+        workspace,
+        "--model",
+        "haiku",
+        "--include-partial-messages",
+        "--include-hook-events",
+        "--",
+        "Start interactively",
+      ],
+      { cwd: workspace, env: { HOME: home } },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("passthrough output\n");
+    const invocation = JSON.parse(await readFile(fakeClaude.logPath, "utf8"));
+    expect(invocation.args).toEqual([
+      "--model",
+      "haiku",
+      "--include-partial-messages",
+      "--include-hook-events",
+      "--",
+      "Start interactively",
+    ]);
+    expect(invocation.args).not.toContain("--session-id");
+  });
+
+  it("rejects continue in wrapper mode", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "claude-pty-continue-work-"));
+    const home = await mkdtemp(path.join(os.tmpdir(), "claude-pty-continue-home-"));
+    const fakeClaude = await createFakeClaudeBin();
+
+    const result = await runCli(
+      ["--claude-bin", fakeClaude.binPath, "--cwd", workspace, "-p", "--continue", "Continue"],
+      { cwd: workspace, env: { HOME: home }, reject: false },
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("--continue is not supported by the PTY wrapper");
+  });
+
+  it("rejects stream-json input in wrapper mode", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "claude-pty-input-work-"));
+    const home = await mkdtemp(path.join(os.tmpdir(), "claude-pty-input-home-"));
+    const fakeClaude = await createFakeClaudeBin();
+
+    const result = await runCli(
+      [
+        "--claude-bin",
+        fakeClaude.binPath,
+        "--cwd",
+        workspace,
+        "-p",
+        "--input-format",
+        "stream-json",
+        "Continue",
+      ],
+      { cwd: workspace, env: { HOME: home }, reject: false },
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("--input-format stream-json is not supported");
   });
 
   it("rejects output-format without print mode", async () => {

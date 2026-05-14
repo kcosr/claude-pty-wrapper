@@ -29,8 +29,8 @@ export function spawnPty(options: PtyRunOptions): PtyHandle {
       ...options.env,
       TERM: options.env.TERM ?? "xterm-256color",
     },
-    cols: options.cols ?? 120,
-    rows: options.rows ?? 40,
+    cols: options.cols ?? process.stdout.columns ?? 120,
+    rows: options.rows ?? process.stdout.rows ?? 40,
   });
 
   proc.onData((data) => options.onData?.(data));
