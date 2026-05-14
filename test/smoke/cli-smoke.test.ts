@@ -28,6 +28,20 @@ describe("claude-pty-wrapper CLI smoke", () => {
         "--name",
         "smoke-test",
         "--dangerously-skip-permissions",
+        "--permission-mode",
+        "plan",
+        "--append-system-prompt",
+        "Prefer concise answers",
+        "--allowed-tools",
+        "Read",
+        "Bash",
+        "--debug",
+        "api",
+        "--verbose",
+        "--plugin-dir",
+        "/tmp/plugin-a",
+        "--plugin-dir",
+        "/tmp/plugin-b",
         "-p",
         "Summarize this repository",
       ],
@@ -35,7 +49,7 @@ describe("claude-pty-wrapper CLI smoke", () => {
     );
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("first answer\n\nsecond answer");
+    expect(result.stdout).toBe("first answer\n\nsecond answer\n");
     const invocation = JSON.parse(await readFile(fakeClaude.logPath, "utf8"));
     expect(invocation.isTTY).toBe(true);
     expect(invocation.stdinIsTTY).toBe(true);
@@ -50,6 +64,20 @@ describe("claude-pty-wrapper CLI smoke", () => {
       "--name",
       "smoke-test",
       "--dangerously-skip-permissions",
+      "--permission-mode",
+      "plan",
+      "--append-system-prompt",
+      "Prefer concise answers",
+      "--allowed-tools",
+      "Read",
+      "Bash",
+      "--debug",
+      "api",
+      "--verbose",
+      "--plugin-dir",
+      "/tmp/plugin-a",
+      "--plugin-dir",
+      "/tmp/plugin-b",
       "Summarize this repository",
     ]);
   });
@@ -103,7 +131,10 @@ describe("claude-pty-wrapper CLI smoke", () => {
         workspace,
         "--session-id",
         sessionId,
-        "--stream-json",
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--include-partial-messages",
         "Show records",
       ],
       { cwd: workspace, env: { HOME: home } },
@@ -152,6 +183,46 @@ describe("claude-pty-wrapper CLI smoke", () => {
       session_id: sessionId,
       terminal_reason: "completed",
     });
+    const invocation = JSON.parse(await readFile(fakeClaude.logPath, "utf8"));
+    expect(invocation.args).not.toContain("--output-format");
+    expect(invocation.args).not.toContain("--include-partial-messages");
+  });
+
+  it("emits Claude-shaped json output as a single result record", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "claude-pty-json-work-"));
+    const home = await mkdtemp(path.join(os.tmpdir(), "claude-pty-json-home-"));
+    const fakeClaude = await createFakeClaudeBin();
+    const sessionId = "690b6a99-4874-48e3-b45e-48f24103798b";
+
+    const result = await runCli(
+      [
+        "--claude-bin",
+        fakeClaude.binPath,
+        "--cwd",
+        workspace,
+        "--session-id",
+        sessionId,
+        "-p",
+        "--output-format",
+        "json",
+        "Show records",
+      ],
+      { cwd: workspace, env: { HOME: home } },
+    );
+
+    const lines = result.stdout.trim().split("\n");
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0])).toMatchObject({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "first answer\n\nsecond answer",
+      session_id: sessionId,
+      terminal_reason: "completed",
+    });
+    const invocation = JSON.parse(await readFile(fakeClaude.logPath, "utf8"));
+    expect(invocation.args).not.toContain("--output-format");
+    expect(invocation.args).not.toContain("-p");
   });
 
   it("resumes from the existing session file offset and does not print prior turns", async () => {
@@ -181,11 +252,20 @@ describe("claude-pty-wrapper CLI smoke", () => {
     );
 
     const result = await runCli(
-      ["--claude-bin", fakeClaude.binPath, "--cwd", workspace, "--resume", sessionId, "Continue"],
+      [
+        "--claude-bin",
+        fakeClaude.binPath,
+        "--cwd",
+        workspace,
+        "--resume",
+        sessionId,
+        "-p",
+        "Continue",
+      ],
       { cwd: workspace, env: { HOME: home } },
     );
 
-    expect(result.stdout).toBe("resumed answer\n\ndone");
+    expect(result.stdout).toBe("resumed answer\n\ndone\n");
     const invocation = JSON.parse(await readFile(fakeClaude.logPath, "utf8"));
     expect(invocation.args.slice(0, 2)).toEqual(["--resume", sessionId]);
     expect(invocation.args).not.toContain("--session-id");
@@ -198,11 +278,58 @@ describe("claude-pty-wrapper CLI smoke", () => {
     await writeFile(fakeClaude.modePath, "hang\n", "utf8");
 
     const result = await runCli(
-      ["--claude-bin", fakeClaude.binPath, "--cwd", workspace, "--timeout", "0.2", "Never finish"],
+      [
+        "--claude-bin",
+        fakeClaude.binPath,
+        "--cwd",
+        workspace,
+        "--timeout",
+        "0.2",
+        "-p",
+        "Never finish",
+      ],
       { cwd: workspace, env: { HOME: home }, reject: false },
     );
 
     expect(result.exitCode).toBe(2);
     expect(result.stdout).toBe("");
+  });
+
+  it("rejects bare prompts until interactive passthrough is implemented", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "claude-pty-bare-work-"));
+    const home = await mkdtemp(path.join(os.tmpdir(), "claude-pty-bare-home-"));
+    const fakeClaude = await createFakeClaudeBin();
+
+    const result = await runCli(
+      ["--claude-bin", fakeClaude.binPath, "--cwd", workspace, "Start interactively"],
+      { cwd: workspace, env: { HOME: home }, reject: false },
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("interactive passthrough is not implemented yet");
+  });
+
+  it("rejects output-format without print mode", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "claude-pty-format-work-"));
+    const home = await mkdtemp(path.join(os.tmpdir(), "claude-pty-format-home-"));
+    const fakeClaude = await createFakeClaudeBin();
+
+    const result = await runCli(
+      [
+        "--claude-bin",
+        fakeClaude.binPath,
+        "--cwd",
+        workspace,
+        "--output-format",
+        "json",
+        "Show records",
+      ],
+      { cwd: workspace, env: { HOME: home }, reject: false },
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("--output-format requires -p/--print");
   });
 });

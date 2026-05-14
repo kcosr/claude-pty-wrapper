@@ -12,6 +12,10 @@ Run with explicit Claude model and effort flags:
 claude-pty-wrapper --model sonnet --effort high -p "Review the diff"
 ```
 
+The wrapper owns `-p/--print`, `--output-format`, `--input-format`, and
+`--session-jsonl`; those flags select wrapper behavior and are not passed to
+Claude. Other Claude flags keep their Claude names and are forwarded.
+
 Emit durable session records instead of extracted text:
 
 ```bash
@@ -21,8 +25,17 @@ claude-pty-wrapper --session-jsonl "List changed files"
 Emit a legacy-like stream JSONL translation:
 
 ```bash
-claude-pty-wrapper --stream-json "List changed files"
+claude-pty-wrapper -p --output-format stream-json "List changed files"
 ```
+
+Emit a single Claude-shaped result object:
+
+```bash
+claude-pty-wrapper -p --output-format json "List changed files"
+```
+
+Until interactive passthrough is implemented, a bare prompt without `-p` is
+rejected so it does not masquerade as Claude's interactive default.
 
 Resume an existing Claude session:
 

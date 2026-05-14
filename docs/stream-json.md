@@ -29,8 +29,8 @@ Those records use Claude's persisted history shape, often including camel-case
 fields such as `sessionId` and terminal records such as
 `{"type":"system","subtype":"turn_duration"}`.
 
-`claude-pty-wrapper --stream-json` translates the durable session records into a
-legacy-like stream:
+`claude-pty-wrapper -p --output-format stream-json` translates the durable
+session records into a legacy-like stream:
 
 - It emits a synthetic `system/init` event. If Claude persisted init metadata,
   the wrapper forwards known metadata fields; otherwise it supplies `cwd` and
@@ -43,6 +43,9 @@ legacy-like stream:
 - It forwards `user` tool-result records so consumers can observe tool outputs.
 - It emits a synthetic `result` record after the durable `turn_duration`
   completion marker.
+- It accepts `--include-partial-messages` for CLI compatibility but silently
+  ignores it because durable session files do not contain runtime partial
+  message deltas.
 
 The translation is compatibility-oriented, not byte-for-byte identical. The
 wrapper cannot synthesize data that is not present in the durable session file,
