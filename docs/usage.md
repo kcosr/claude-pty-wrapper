@@ -1,5 +1,21 @@
 # Usage
 
+From a checkout, build and link the command before running it from your shell:
+
+```bash
+npm install
+npm run build
+npm link
+```
+
+For development validation before linking, run:
+
+```bash
+npm install
+npm run check
+npm link
+```
+
 Run Claude's normal interactive mode:
 
 ```bash

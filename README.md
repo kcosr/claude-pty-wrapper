@@ -87,17 +87,48 @@ tools that pass it with `--output-format stream-json`.
 Use `-p/--print` for wrapper-managed text, JSON, and stream JSON output. A bare
 prompt without wrapper output flags uses Claude's normal interactive behavior.
 
-## Development
+## Running Locally
+
+Install dependencies, build the CLI, and link the command into your local
+`PATH`:
 
 ```bash
 npm install
+npm run build
 npm link
+```
+
+Then run it as:
+
+```bash
+claude-pty-wrapper "Summarize this repository"
+claude-pty-wrapper -p "Summarize this repository"
+```
+
+After code changes, rerun `npm run build`; the linked command points at this
+repo's `dist/` output.
+
+## Development
+
+Run the full local validation suite:
+
+```bash
+npm install
 npm run check
 ```
 
-Smoke tests build the CLI and run it against a fake Claude executable that is
-spawned through `node-pty` and writes real session JSONL files under a temporary
-`HOME`.
+`npm run check` runs linting, typechecking, unit/integration tests, and smoke
+tests. The smoke tests build the CLI first, then run it against a fake Claude
+executable that is spawned through `node-pty` and writes real session JSONL
+files under a temporary `HOME`.
+
+To validate before linking, use:
+
+```bash
+npm install
+npm run check
+npm link
+```
 
 Live smoke tests are opt-in because they invoke the installed Claude binary and
 may consume Claude/API quota:
