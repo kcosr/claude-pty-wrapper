@@ -6,6 +6,16 @@
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.1.0] - 2026-05-14
+
+### Added
+
 - Added the initial `claude-pty-wrapper` CLI, which spawns interactive Claude in a
   PTY, tails durable session JSONL, and emits extracted assistant text or raw
   appended session records.
@@ -39,5 +49,3 @@
 - Improved stream-json parity by counting user turns, omitting null
   `parent_tool_use_id` fields, and carrying persisted stop reasons when
   available.
-
-### Removed
