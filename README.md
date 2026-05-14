@@ -54,35 +54,31 @@ claude-pty-wrapper --resume 18a18377-217d-4b29-9a68-c70a89b79330 -p "Continue"
 Resume mode tails from the existing session file size before spawning Claude,
 so output is scoped to the resumed turn.
 
-## Options
+## Option Handling
+
+Wrapper-owned flags:
 
 ```text
--p, --print                     Run in print-compatible mode
---output-format <format>        text, json, or stream-json
---input-format <format>         text; stream-json is not supported yet
---session-jsonl                 Emit appended raw Claude session JSONL
---resume <session-id>           Resume an existing Claude session
---session-id <uuid>             Use an explicit session id for a fresh run
---cwd <dir>                     Working directory for Claude and path lookup
---claude-bin <path>             Claude binary; defaults to CLAUDE_BIN or claude
---timeout <seconds>             Overall turn timeout
---model <model>                 Forward to Claude
---effort <level>                Forward to Claude
---name <name>                   Forward to Claude
---dangerously-skip-permissions  Forward to Claude
---debug [filter]                Forward to Claude
---verbose                       Forward to Claude
---raw-pty-log <file>            Write raw PTY output for diagnostics
---wrapper-debug                 Print wrapper diagnostics to stderr
+-p, --print                 Use wrapper-managed print-compatible output
+--output-format <format>    Wrapper output: text, json, or stream-json
+--input-format <format>     Wrapper input: text; stream-json is not supported yet
+--session-jsonl             Emit appended raw Claude session JSONL
+--cwd <dir>                 Working directory for Claude and session path lookup
+--claude-bin <path>         Claude binary; defaults to CLAUDE_BIN or claude
+--timeout <seconds>         Wrapper turn timeout
+--raw-pty-log <file>        Write raw PTY output for diagnostics
+--wrapper-debug             Print wrapper diagnostics to stderr
 ```
 
-The wrapper interprets `-p/--print`, `--output-format`, `--input-format`, and
-`--session-jsonl` itself because those modes are the purpose of the app; they
-are never forwarded to Claude. Other Claude flags keep their Claude names and
-are passed through before the prompt. Additional wrapper-only flags are `--cwd`,
-`--claude-bin`, `--timeout`, `--raw-pty-log`, and `--wrapper-debug`.
-`--include-partial-messages` is accepted as a no-op for compatibility with
-tools that pass it with `--output-format stream-json`.
+All other supported Claude flags keep their Claude names and are passed through
+before the prompt. Examples include `--model`, `--effort`, `--name`,
+`--session-id`, `--resume`, `--dangerously-skip-permissions`, `--debug`, and
+`--verbose`. Run `claude-pty-wrapper --help` for the full accepted flag list.
+
+`--include-partial-messages` is accepted as a no-op in wrapper stream-json mode
+for compatibility with tools that pass it. In passthrough mode, runtime stream
+flags such as `--include-partial-messages` and `--include-hook-events` are
+forwarded to Claude.
 
 Use `-p/--print` for wrapper-managed text, JSON, and stream JSON output. A bare
 prompt without wrapper output flags uses Claude's normal interactive behavior.

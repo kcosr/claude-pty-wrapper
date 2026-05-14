@@ -1,6 +1,6 @@
 {
   "name": "claude-pty-wrapper",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A PTY-backed Claude print-mode replacement that streams Claude session JSONL.",
   "type": "module",
   "bin": {

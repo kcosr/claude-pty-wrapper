@@ -12,6 +12,14 @@
 
 ### Removed
 
+## [0.1.1] - 2026-05-14
+
+### Changed
+
+- Clarified README and usage documentation for wrapper-owned flags versus
+  Claude pass-through flags.
+- Clarified local build, link, and development validation instructions.
+
 ## [0.1.0] - 2026-05-14
 
 ### Added

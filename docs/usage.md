@@ -36,7 +36,10 @@ claude-pty-wrapper --model sonnet --effort high -p "Review the diff"
 
 The wrapper owns `-p/--print`, `--output-format`, `--input-format`, and
 `--session-jsonl`; those flags select wrapper behavior and are not passed to
-Claude. Other Claude flags keep their Claude names and are forwarded.
+Claude. Wrapper diagnostics such as `--claude-bin`, `--cwd`, `--timeout`,
+`--raw-pty-log`, and `--wrapper-debug` are also handled by the wrapper. Other
+supported Claude flags keep their Claude names and are forwarded; run
+`claude-pty-wrapper --help` for the full accepted flag list.
 
 Emit durable session records instead of extracted text:
 
