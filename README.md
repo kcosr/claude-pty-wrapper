@@ -12,8 +12,18 @@ print-like CLI that streams assistant text from Claude's durable session JSONL.
 claude-pty-wrapper "Summarize this repository"
 ```
 
-Without wrapper output flags, `claude-pty-wrapper` passes through to Claude's
-normal interactive mode using the current terminal.
+Without wrapper output flags, `claude-pty-wrapper` runs Claude in a
+wrapper-owned PTY and relays bytes between Claude and the current terminal.
+The terminal still renders ANSI/control sequences; the wrapper does not emulate
+or parse the screen.
+
+```bash
+claude-pty-wrapper --freshness-interval 60 "Summarize this repository"
+```
+
+In passthrough mode, `--freshness-interval` enables optional idle prompts. If
+neither Claude output nor user input is observed for the interval, the wrapper
+sends the freshness message into Claude's PTY followed by Enter.
 
 ```bash
 claude-pty-wrapper -p "Summarize this repository"
@@ -68,6 +78,12 @@ Wrapper-owned flags:
 --timeout <seconds>         Wrapper turn timeout
 --raw-pty-log <file>        Write raw PTY output for diagnostics
 --wrapper-debug             Print wrapper diagnostics to stderr
+--freshness-interval <sec>  Passthrough idle interval; enables freshness prompts
+--freshness-message <text>  Passthrough idle message; defaults to "Please wait for further instructions."
+--freshness-max-iterations <count>
+                            Stop after this many freshness prompts
+--freshness-max-duration <sec>
+                            Stop freshness behavior after this session duration
 ```
 
 All other supported Claude flags keep their Claude names and are passed through
@@ -81,7 +97,13 @@ flags such as `--include-partial-messages` and `--include-hook-events` are
 forwarded to Claude.
 
 Use `-p/--print` for wrapper-managed text, JSON, and stream JSON output. A bare
-prompt without wrapper output flags uses Claude's normal interactive behavior.
+prompt without wrapper output flags uses interactive passthrough through a
+wrapper-owned PTY relay.
+
+Freshness flags are passthrough-only. `--freshness-message`,
+`--freshness-max-iterations`, and `--freshness-max-duration` require
+`--freshness-interval`; max iterations and max duration are mutually exclusive.
+Freshness is inactive unless `--freshness-interval` is set.
 
 ## Running Locally
 

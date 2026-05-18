@@ -7,6 +7,7 @@ export interface FakeClaudeBin {
   logPath: string;
   modePath: string;
   signalPath: string;
+  stdinLogPath: string;
 }
 
 export async function createFakeClaudeBin(): Promise<FakeClaudeBin> {
@@ -15,6 +16,7 @@ export async function createFakeClaudeBin(): Promise<FakeClaudeBin> {
   const logPath = path.join(dir, "invocation.json");
   const modePath = path.join(dir, "mode.txt");
   const signalPath = path.join(dir, "signal.txt");
+  const stdinLogPath = path.join(dir, "stdin.jsonl");
   await writeFile(
     binPath,
     `#!/usr/bin/env node
@@ -25,6 +27,7 @@ import { join, resolve } from "node:path";
 const logPath = ${JSON.stringify(logPath)};
 const modePath = ${JSON.stringify(modePath)};
 const signalPath = ${JSON.stringify(signalPath)};
+const stdinLogPath = ${JSON.stringify(stdinLogPath)};
 const args = process.argv.slice(2);
 const mode = readFileSync(modePath, "utf8").trim();
 const cwd = process.cwd();
@@ -41,7 +44,42 @@ writeFileSync(logPath, JSON.stringify({
 
 if (mode === "passthrough") {
   console.log("passthrough output");
-  process.exit(0);
+  setTimeout(() => process.exit(0), 25);
+} else if (mode.startsWith("passthrough-stdin-count:")) {
+  const expectedChunks = Number(mode.split(":")[1]);
+  let chunks = 0;
+  process.stdin.on("data", (chunk) => {
+    chunks += 1;
+    appendFileSync(stdinLogPath, JSON.stringify({ data: chunk.toString("utf8"), time: Date.now() }) + "\\n");
+    if (chunks >= expectedChunks) {
+      process.exit(0);
+    }
+  });
+  setInterval(() => {}, 1000);
+} else if (mode.startsWith("passthrough-periodic-output:")) {
+  const [, intervalText, countText] = mode.split(":");
+  const intervalMs = Number(intervalText);
+  const count = Number(countText);
+  let emitted = 0;
+  process.stdin.on("data", (chunk) => {
+    appendFileSync(stdinLogPath, JSON.stringify({ data: chunk.toString("utf8"), time: Date.now() }) + "\\n");
+    process.exit(0);
+  });
+  const interval = setInterval(() => {
+    emitted += 1;
+    process.stdout.write("activity " + emitted + "\\n");
+    if (emitted >= count) {
+      clearInterval(interval);
+    }
+  }, intervalMs);
+  setInterval(() => {}, 1000);
+} else if (mode.startsWith("passthrough-exit-after:")) {
+  const delayMs = Number(mode.split(":")[1]);
+  process.stdin.on("data", (chunk) => {
+    appendFileSync(stdinLogPath, JSON.stringify({ data: chunk.toString("utf8"), time: Date.now() }) + "\\n");
+  });
+  setTimeout(() => process.exit(0), delayMs);
+  setInterval(() => {}, 1000);
 } else if (!sessionId) {
   throw new Error("fake Claude expected --session-id or --resume");
 } else if (mode === "hang") {
@@ -101,5 +139,5 @@ function statMaybe(path) {
   );
   await chmod(binPath, 0o755);
   await writeFile(modePath, "hold\n", "utf8");
-  return { binPath, logPath, modePath, signalPath };
+  return { binPath, logPath, modePath, signalPath, stdinLogPath };
 }

@@ -22,6 +22,19 @@ Run Claude's normal interactive mode:
 claude-pty-wrapper "Explain the current repository"
 ```
 
+Bare interactive mode runs Claude in a wrapper-owned PTY relay. Claude output is
+written back to the terminal unchanged, and terminal input is forwarded to
+Claude without screen emulation.
+
+Enable idle freshness prompts in bare interactive mode:
+
+```bash
+claude-pty-wrapper --freshness-interval 60 "Explain the current repository"
+```
+
+When freshness is enabled, PTY output and user stdin both reset the idle timer.
+The default injected message is `Please wait for further instructions.`.
+
 Run a fresh print-like turn:
 
 ```bash
@@ -37,9 +50,13 @@ claude-pty-wrapper --model sonnet --effort high -p "Review the diff"
 The wrapper owns `-p/--print`, `--output-format`, `--input-format`, and
 `--session-jsonl`; those flags select wrapper behavior and are not passed to
 Claude. Wrapper diagnostics such as `--claude-bin`, `--cwd`, `--timeout`,
-`--raw-pty-log`, and `--wrapper-debug` are also handled by the wrapper. Other
-supported Claude flags keep their Claude names and are forwarded; run
-`claude-pty-wrapper --help` for the full accepted flag list.
+`--raw-pty-log`, and `--wrapper-debug` are also handled by the wrapper.
+Passthrough freshness flags such as `--freshness-interval`,
+`--freshness-message`, `--freshness-max-iterations`, and
+`--freshness-max-duration` are handled by the wrapper and are rejected with
+wrapper-managed output modes. Other supported Claude flags keep their Claude
+names and are forwarded; run `claude-pty-wrapper --help` for the full accepted
+flag list.
 
 Emit durable session records instead of extracted text:
 
@@ -60,7 +77,7 @@ claude-pty-wrapper -p --output-format json "List changed files"
 ```
 
 A bare prompt without wrapper output flags passes through to Claude's normal
-interactive behavior.
+interactive behavior through the wrapper-owned PTY relay.
 
 Resume an existing Claude session:
 

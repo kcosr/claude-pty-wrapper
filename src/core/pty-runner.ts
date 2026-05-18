@@ -18,6 +18,7 @@ export interface PtyExit {
 
 export interface PtyHandle {
   write(data: string): void;
+  resize(cols: number, rows: number): void;
   kill(signal?: string): void;
   waitForExit(): Promise<PtyExit>;
 }
@@ -44,6 +45,9 @@ export function spawnPty(options: PtyRunOptions): PtyHandle {
   return {
     write(data) {
       proc.write(data);
+    },
+    resize(cols, rows) {
+      proc.resize(cols, rows);
     },
     kill(signal) {
       proc.kill(signal);
