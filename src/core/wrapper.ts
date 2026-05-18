@@ -13,7 +13,7 @@ import {
   streamBoundarySeparator,
 } from "./claude-records.js";
 import { tailJsonl } from "./claude-session-tail.js";
-import { ClaudePtyWrapperError } from "./errors.js";
+import { ClaudePtyWrapperError, errorMessage } from "./errors.js";
 import { type PtyHandle, openRawPtyLog, spawnPty } from "./pty-runner.js";
 import {
   createSyntheticStreamJsonState,
@@ -346,11 +346,4 @@ function asWrapperError(error: unknown): ClaudePtyWrapperError {
     return error;
   }
   return new ClaudePtyWrapperError(errorMessage(error));
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
 }

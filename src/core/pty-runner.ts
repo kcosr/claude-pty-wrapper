@@ -12,12 +12,13 @@ export interface PtyRunOptions {
 }
 
 export interface PtyExit {
-  exitCode: number | null;
-  signal?: number | string | null;
+  exitCode: number;
+  signal: number;
 }
 
 export interface PtyHandle {
   write(data: string): void;
+  resize(cols: number, rows: number): void;
   kill(signal?: string): void;
   waitForExit(): Promise<PtyExit>;
 }
@@ -37,13 +38,16 @@ export function spawnPty(options: PtyRunOptions): PtyHandle {
 
   const exitPromise = new Promise<PtyExit>((resolve) => {
     proc.onExit((event) => {
-      resolve({ exitCode: event.exitCode, signal: event.signal });
+      resolve({ exitCode: event.exitCode, signal: event.signal ?? 0 });
     });
   });
 
   return {
     write(data) {
       proc.write(data);
+    },
+    resize(cols, rows) {
+      proc.resize(cols, rows);
     },
     kill(signal) {
       proc.kill(signal);

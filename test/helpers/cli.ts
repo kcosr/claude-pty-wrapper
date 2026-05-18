@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -13,10 +13,23 @@ export interface CliResult {
   exitCode: number;
 }
 
-export async function runCli(
-  args: string[],
-  options: { cwd: string; env?: Record<string, string | undefined>; reject?: boolean },
-): Promise<CliResult> {
+export interface TimedInput {
+  delayMs: number;
+  data: string | Buffer;
+}
+
+interface RunCliOptions {
+  cwd: string;
+  env?: Record<string, string | undefined>;
+  reject?: boolean;
+  input?: string | Buffer;
+  timedInput?: TimedInput[];
+}
+
+export async function runCli(args: string[], options: RunCliOptions): Promise<CliResult> {
+  if (options.input !== undefined || options.timedInput !== undefined) {
+    return runCliWithSpawn(args, options);
+  }
   try {
     const { stdout, stderr } = await execFileAsync(process.execPath, [cliPath, ...args], {
       cwd: options.cwd,
@@ -36,4 +49,52 @@ export async function runCli(
     }
     throw error;
   }
+}
+
+async function runCliWithSpawn(args: string[], options: RunCliOptions): Promise<CliResult> {
+  const child = spawn(process.execPath, [cliPath, ...args], {
+    cwd: options.cwd,
+    env: {
+      ...process.env,
+      ...options.env,
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  child.stdout.on("data", (chunk) => {
+    stdout.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+  });
+
+  if (options.input !== undefined) {
+    child.stdin.write(options.input);
+    child.stdin.end();
+  } else {
+    for (const item of options.timedInput ?? []) {
+      setTimeout(() => {
+        child.stdin.write(item.data);
+      }, item.delayMs).unref();
+    }
+  }
+
+  const exitCode = await new Promise<number>((resolve, reject) => {
+    child.on("error", reject);
+    child.on("exit", (code) => resolve(code ?? 1));
+  });
+
+  const result = {
+    stdout: Buffer.concat(stdout).toString("utf8"),
+    stderr: Buffer.concat(stderr).toString("utf8"),
+    exitCode,
+  };
+  if (exitCode !== 0 && options.reject !== false) {
+    throw new Error(
+      `CLI exited with ${exitCode}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
+  }
+  return result;
 }

@@ -3,8 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command, Option } from "commander";
 import { ClaudePtyWrapperError } from "../core/errors.js";
-import { runClaudePassthrough } from "../core/passthrough.js";
+import { type FreshnessOptions, runClaudePassthrough } from "../core/passthrough.js";
 import { type OutputMode, runClaudePtyWrapper } from "../core/wrapper.js";
+
+const DEFAULT_FRESHNESS_MESSAGE = "Please wait for further instructions.";
 
 type CommandOptions = {
   print?: boolean;
@@ -61,6 +63,10 @@ type CommandOptions = {
   tmux?: string | boolean;
   sessionPersistence?: boolean;
   replayUserMessages?: boolean;
+  freshnessInterval?: number;
+  freshnessMessage?: string;
+  freshnessMaxIterations?: number;
+  freshnessMaxDuration?: number;
 };
 
 export function configureProgram(): Command {
@@ -89,7 +95,7 @@ export function configureProgram(): Command {
     .option("--claude-bin <path>", "Claude binary", process.env.CLAUDE_BIN ?? "claude")
     .addOption(
       new Option("--timeout <seconds>", "turn timeout in seconds")
-        .argParser(parsePositiveSeconds)
+        .argParser((value) => parsePositiveSeconds(value))
         .default(300),
     )
     .option("--model <model>", "forward model to Claude")
@@ -139,6 +145,25 @@ export function configureProgram(): Command {
     .option("--tmux [mode]", "forward tmux mode to Claude")
     .option("--no-session-persistence", "forward no-session-persistence flag to Claude")
     .option("--replay-user-messages", "forward replay-user-messages flag to Claude")
+    .addOption(
+      new Option(
+        "--freshness-interval <seconds>",
+        "passthrough idle interval in seconds",
+      ).argParser((value) => parsePositiveSeconds(value, "freshness interval")),
+    )
+    .option("--freshness-message <text>", "passthrough idle message", DEFAULT_FRESHNESS_MESSAGE)
+    .addOption(
+      new Option(
+        "--freshness-max-iterations <count>",
+        "maximum number of passthrough idle messages",
+      ).argParser(parsePositiveInteger),
+    )
+    .addOption(
+      new Option(
+        "--freshness-max-duration <seconds>",
+        "maximum passthrough freshness duration in seconds",
+      ).argParser((value) => parsePositiveSeconds(value, "freshness max duration")),
+    )
     .option(
       "--include-partial-messages",
       "accepted for Claude compatibility; partial events are not emitted",
@@ -157,6 +182,7 @@ export function configureProgram(): Command {
             claudeBin: options.claudeBin,
             cwd: options.cwd,
             args: buildPassthroughClaudeArgs(root, options, prompt),
+            freshness: buildFreshnessOptions(options),
           });
           process.exitCode = code;
           return;
@@ -191,7 +217,10 @@ function validateCommandOptions(root: Command, options: CommandOptions): void {
   const wrapperMode = wrapperModeRequested(root, options);
   if (!wrapperMode) {
     rejectWrapperOnlyPassthroughOption(root, options);
+  } else {
+    rejectPassthroughOnlyWrapperOptions(root);
   }
+  validateFreshnessOptions(root, options);
   if (options.continue && wrapperMode) {
     throw new ClaudePtyWrapperError(
       "--continue is not supported by the PTY wrapper; use --resume <session-id>",
@@ -224,6 +253,40 @@ function validateCommandOptions(root: Command, options: CommandOptions): void {
   }
 }
 
+function rejectPassthroughOnlyWrapperOptions(root: Command): void {
+  const freshnessFlags = [
+    "freshnessInterval",
+    "freshnessMessage",
+    "freshnessMaxIterations",
+    "freshnessMaxDuration",
+  ];
+  for (const flag of freshnessFlags) {
+    if (root.getOptionValueSource(flag) === "cli") {
+      throw new ClaudePtyWrapperError(
+        `--${kebabCase(flag)} requires passthrough mode and cannot be used with wrapper output mode`,
+      );
+    }
+  }
+}
+
+function validateFreshnessOptions(root: Command, options: CommandOptions): void {
+  const intervalWasSet = root.getOptionValueSource("freshnessInterval") === "cli";
+  if (root.getOptionValueSource("freshnessMessage") === "cli" && !intervalWasSet) {
+    throw new ClaudePtyWrapperError("--freshness-message requires --freshness-interval");
+  }
+  if (options.freshnessMaxIterations !== undefined && !intervalWasSet) {
+    throw new ClaudePtyWrapperError("--freshness-max-iterations requires --freshness-interval");
+  }
+  if (options.freshnessMaxDuration !== undefined && !intervalWasSet) {
+    throw new ClaudePtyWrapperError("--freshness-max-duration requires --freshness-interval");
+  }
+  if (options.freshnessMaxIterations !== undefined && options.freshnessMaxDuration !== undefined) {
+    throw new ClaudePtyWrapperError(
+      "choose either --freshness-max-iterations or --freshness-max-duration",
+    );
+  }
+}
+
 function rejectWrapperOnlyPassthroughOption(root: Command, options: CommandOptions): void {
   if (root.getOptionValueSource("timeout") === "cli") {
     throw new ClaudePtyWrapperError("--timeout requires -p/--print or --session-jsonl");
@@ -250,6 +313,19 @@ function resolveOutputMode(_root: Command, options: CommandOptions): OutputMode 
     return "session-jsonl";
   }
   return options.outputFormat;
+}
+
+function buildFreshnessOptions(options: CommandOptions): FreshnessOptions | undefined {
+  if (options.freshnessInterval === undefined) {
+    return undefined;
+  }
+  return {
+    intervalMs: options.freshnessInterval * 1_000,
+    message: options.freshnessMessage ?? DEFAULT_FRESHNESS_MESSAGE,
+    maxIterations: options.freshnessMaxIterations,
+    maxDurationMs:
+      options.freshnessMaxDuration === undefined ? undefined : options.freshnessMaxDuration * 1_000,
+  };
 }
 
 function buildPassthroughClaudeArgs(
@@ -393,12 +469,24 @@ async function resolvePrompt(
   return Buffer.concat(chunks).toString("utf8");
 }
 
-function parsePositiveSeconds(value: string): number {
+function parsePositiveSeconds(value: string, label = "timeout"): number {
   const seconds = Number(value);
   if (!Number.isFinite(seconds) || seconds <= 0) {
-    throw new Error("timeout must be a positive number of seconds");
+    throw new Error(`${label} must be a positive number of seconds`);
   }
   return seconds;
+}
+
+function parsePositiveInteger(value: string): number {
+  const count = Number(value);
+  if (!Number.isInteger(count) || count <= 0) {
+    throw new Error("freshness max iterations must be a positive integer");
+  }
+  return count;
+}
+
+function kebabCase(value: string): string {
+  return value.replace(/[A-Z]/g, (character) => `-${character.toLowerCase()}`);
 }
 
 async function run(fn: () => Promise<void>): Promise<void> {
