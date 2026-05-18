@@ -6,18 +6,24 @@
 
 ### Added
 
-- Added passthrough freshness flags for interactive mode:
-  `--freshness-interval`, `--freshness-message`,
-  `--freshness-max-iterations`, and `--freshness-max-duration`.
-
 ### Changed
-
-- Changed bare interactive passthrough to run Claude through a wrapper-owned PTY
-  relay so the wrapper can observe terminal output and input activity.
 
 ### Fixed
 
 ### Removed
+
+## [0.2.0] - 2026-05-18
+
+### Added
+
+- Added passthrough freshness flags for interactive mode:
+  `--freshness-interval`, `--freshness-message`,
+  `--freshness-max-iterations`, and `--freshness-max-duration`. (#1)
+
+### Changed
+
+- Changed bare interactive passthrough to run Claude through a wrapper-owned PTY
+  relay so the wrapper can observe terminal output and input activity. (#1)
 
 ## [0.1.1] - 2026-05-14
 
