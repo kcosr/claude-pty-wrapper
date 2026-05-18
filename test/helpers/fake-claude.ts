@@ -45,6 +45,12 @@ writeFileSync(logPath, JSON.stringify({
 if (mode === "passthrough") {
   console.log("passthrough output");
   setTimeout(() => process.exit(0), 25);
+} else if (mode.startsWith("passthrough-exit-code:")) {
+  const code = Number(mode.split(":")[1]);
+  setTimeout(() => process.exit(code), 25);
+} else if (mode.startsWith("passthrough-signal:")) {
+  const signal = mode.split(":")[1];
+  setTimeout(() => process.kill(process.pid, signal), 25);
 } else if (mode.startsWith("passthrough-stdin-count:")) {
   const expectedChunks = Number(mode.split(":")[1]);
   let chunks = 0;
@@ -61,17 +67,19 @@ if (mode === "passthrough") {
   const intervalMs = Number(intervalText);
   const count = Number(countText);
   let emitted = 0;
-  process.stdin.on("data", (chunk) => {
-    appendFileSync(stdinLogPath, JSON.stringify({ data: chunk.toString("utf8"), time: Date.now() }) + "\\n");
-    process.exit(0);
-  });
-  const interval = setInterval(() => {
+  const emit = () => {
     emitted += 1;
     process.stdout.write("activity " + emitted + "\\n");
     if (emitted >= count) {
       clearInterval(interval);
     }
-  }, intervalMs);
+  };
+  process.stdin.on("data", (chunk) => {
+    appendFileSync(stdinLogPath, JSON.stringify({ data: chunk.toString("utf8"), time: Date.now() }) + "\\n");
+    process.exit(0);
+  });
+  const interval = setInterval(emit, intervalMs);
+  emit();
   setInterval(() => {}, 1000);
 } else if (mode.startsWith("passthrough-exit-after:")) {
   const delayMs = Number(mode.split(":")[1]);

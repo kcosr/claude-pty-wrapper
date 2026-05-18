@@ -1,6 +1,6 @@
-import { constants as osConstants } from "node:os";
 import { resolve } from "node:path";
-import { ClaudePtyWrapperError } from "./errors.js";
+import { StringDecoder } from "node:string_decoder";
+import { ClaudePtyWrapperError, errorMessage } from "./errors.js";
 import { type PtyExit, type PtyHandle, spawnPty } from "./pty-runner.js";
 
 export interface ClaudePassthroughOptions {
@@ -40,15 +40,45 @@ export async function runClaudePassthrough(options: ClaudePassthroughOptions): P
 
   const stdin = process.stdin;
   const previousRawMode = stdin.isTTY ? stdin.isRaw : undefined;
+  const stdinDecoder = new StringDecoder("utf8");
+  let ptyExited = false;
+  let cleaningUpForSignal = false;
 
   const onStdinData = (chunk: Buffer | string) => {
     freshness?.noteActivity();
-    ptyHandle.write(Buffer.isBuffer(chunk) ? chunk.toString("utf8") : chunk);
+    ptyHandle.write(Buffer.isBuffer(chunk) ? stdinDecoder.write(chunk) : chunk);
   };
   const onResize = () => {
     try {
       ptyHandle.resize(terminalCols(), terminalRows());
     } catch {}
+  };
+  const restoreStdin = () => {
+    stdin.off("data", onStdinData);
+    if (
+      stdin.isTTY &&
+      typeof stdin.setRawMode === "function" &&
+      typeof previousRawMode === "boolean"
+    ) {
+      stdin.setRawMode(previousRawMode);
+    }
+    stdin.pause();
+  };
+  const cleanupListeners = () => {
+    process.off("SIGWINCH", onResize);
+    for (const signal of relayCleanupSignals) {
+      process.off(signal, onProcessSignal);
+    }
+  };
+  const onProcessSignal = (signal: NodeJS.Signals) => {
+    cleaningUpForSignal = true;
+    freshness?.stop();
+    cleanupListeners();
+    restoreStdin();
+    try {
+      ptyHandle.kill(signal);
+    } catch {}
+    process.kill(process.pid, signal);
   };
 
   try {
@@ -58,23 +88,23 @@ export async function runClaudePassthrough(options: ClaudePassthroughOptions): P
     stdin.resume();
     stdin.on("data", onStdinData);
     process.on("SIGWINCH", onResize);
-    onResize();
+    for (const signal of relayCleanupSignals) {
+      process.once(signal, onProcessSignal);
+    }
     freshness?.start((message) => ptyHandle.write(`${message}\r`));
 
     const exit = await ptyHandle.waitForExit();
+    ptyExited = true;
     return ptyExitCode(exit);
   } finally {
     freshness?.stop();
-    stdin.off("data", onStdinData);
-    process.off("SIGWINCH", onResize);
-    if (
-      stdin.isTTY &&
-      typeof stdin.setRawMode === "function" &&
-      typeof previousRawMode === "boolean"
-    ) {
-      stdin.setRawMode(previousRawMode);
+    cleanupListeners();
+    restoreStdin();
+    if (!ptyExited && !cleaningUpForSignal) {
+      try {
+        ptyHandle.kill("SIGTERM");
+      } catch {}
     }
-    stdin.pause();
   }
 }
 
@@ -83,6 +113,15 @@ function createFreshnessController(options: FreshnessOptions): {
   noteActivity(): void;
   stop(): void;
 } {
+  if (options.intervalMs <= 0) {
+    throw new ClaudePtyWrapperError("freshness interval must be a positive number of seconds");
+  }
+  if (options.maxIterations !== undefined && options.maxIterations <= 0) {
+    throw new ClaudePtyWrapperError("freshness max iterations must be a positive integer");
+  }
+  if (options.maxDurationMs !== undefined && options.maxDurationMs <= 0) {
+    throw new ClaudePtyWrapperError("freshness max duration must be a positive number of seconds");
+  }
   let timer: NodeJS.Timeout | null = null;
   let writeFreshnessMessage: ((message: string) => void) | null = null;
   let lastActivityAt = Date.now();
@@ -166,16 +205,10 @@ function createFreshnessController(options: FreshnessOptions): {
 }
 
 function ptyExitCode(exit: PtyExit): number {
-  if (typeof exit.exitCode === "number") {
-    return exit.exitCode;
-  }
-  if (typeof exit.signal === "number") {
+  if (exit.signal > 0) {
     return 128 + exit.signal;
   }
-  if (typeof exit.signal === "string") {
-    return signalExitCode(exit.signal as NodeJS.Signals);
-  }
-  return 1;
+  return exit.exitCode;
 }
 
 function terminalCols(): number {
@@ -186,14 +219,4 @@ function terminalRows(): number {
   return process.stdout.rows ?? 40;
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
-}
-
-function signalExitCode(signal: NodeJS.Signals): number {
-  const signalNumber = osConstants.signals[signal];
-  return signalNumber === undefined ? 1 : 128 + signalNumber;
-}
+const relayCleanupSignals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];

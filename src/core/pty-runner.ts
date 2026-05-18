@@ -12,8 +12,8 @@ export interface PtyRunOptions {
 }
 
 export interface PtyExit {
-  exitCode: number | null;
-  signal?: number | string | null;
+  exitCode: number;
+  signal: number;
 }
 
 export interface PtyHandle {
@@ -38,7 +38,7 @@ export function spawnPty(options: PtyRunOptions): PtyHandle {
 
   const exitPromise = new Promise<PtyExit>((resolve) => {
     proc.onExit((event) => {
-      resolve({ exitCode: event.exitCode, signal: event.signal });
+      resolve({ exitCode: event.exitCode, signal: event.signal ?? 0 });
     });
   });
 

@@ -15,14 +15,14 @@ export interface CliResult {
 
 export interface TimedInput {
   delayMs: number;
-  data: string;
+  data: string | Buffer;
 }
 
 interface RunCliOptions {
   cwd: string;
   env?: Record<string, string | undefined>;
   reject?: boolean;
-  input?: string;
+  input?: string | Buffer;
   timedInput?: TimedInput[];
 }
 

@@ -378,6 +378,60 @@ describe("claude-pty-wrapper CLI smoke", () => {
     expect(chunks[0].data).toContain("hello from user");
   });
 
+  it("relays split multibyte stdin to bare passthrough Claude", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "claude-pty-utf8-work-"));
+    const home = await mkdtemp(path.join(os.tmpdir(), "claude-pty-utf8-home-"));
+    const fakeClaude = await createFakeClaudeBin();
+    await writeFile(fakeClaude.modePath, "passthrough-stdin-count:1\n", "utf8");
+
+    const euro = Buffer.from("€\n", "utf8");
+    const result = await runCli(
+      ["--claude-bin", fakeClaude.binPath, "--cwd", workspace, "--", "Start interactively"],
+      {
+        cwd: workspace,
+        env: { HOME: home },
+        timedInput: [
+          { delayMs: 10, data: euro.subarray(0, 1) },
+          { delayMs: 20, data: euro.subarray(1) },
+        ],
+      },
+    );
+
+    expect(result.exitCode).toBe(0);
+    const chunks = await readStdinLog(fakeClaude.stdinLogPath);
+    expect(chunks.map((chunk) => chunk.data).join("")).toContain("€");
+  });
+
+  it("propagates non-zero bare passthrough exit codes", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "claude-pty-exit-work-"));
+    const home = await mkdtemp(path.join(os.tmpdir(), "claude-pty-exit-home-"));
+    const fakeClaude = await createFakeClaudeBin();
+    await writeFile(fakeClaude.modePath, "passthrough-exit-code:3\n", "utf8");
+
+    const result = await runCli(["--claude-bin", fakeClaude.binPath, "--cwd", workspace], {
+      cwd: workspace,
+      env: { HOME: home },
+      reject: false,
+    });
+
+    expect(result.exitCode).toBe(3);
+  });
+
+  it("maps bare passthrough signal exits to shell-style exit codes", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "claude-pty-signal-work-"));
+    const home = await mkdtemp(path.join(os.tmpdir(), "claude-pty-signal-home-"));
+    const fakeClaude = await createFakeClaudeBin();
+    await writeFile(fakeClaude.modePath, "passthrough-signal:SIGKILL\n", "utf8");
+
+    const result = await runCli(["--claude-bin", fakeClaude.binPath, "--cwd", workspace], {
+      cwd: workspace,
+      env: { HOME: home },
+      reject: false,
+    });
+
+    expect(result.exitCode).toBe(137);
+  });
+
   it("injects the default freshness message after passthrough idle", async () => {
     const workspace = await mkdtemp(path.join(os.tmpdir(), "claude-pty-fresh-default-work-"));
     const home = await mkdtemp(path.join(os.tmpdir(), "claude-pty-fresh-default-home-"));
@@ -437,7 +491,7 @@ describe("claude-pty-wrapper CLI smoke", () => {
     const startedAt = Date.now();
 
     const result = await runCli(
-      ["--claude-bin", fakeClaude.binPath, "--cwd", workspace, "--freshness-interval", "0.2"],
+      ["--claude-bin", fakeClaude.binPath, "--cwd", workspace, "--freshness-interval", "0.6"],
       { cwd: workspace, env: { HOME: home } },
     );
 
@@ -446,7 +500,7 @@ describe("claude-pty-wrapper CLI smoke", () => {
     const chunks = await readStdinLog(fakeClaude.stdinLogPath);
     expect(chunks).toHaveLength(1);
     expect(chunks[0].data).toContain("Please wait for further instructions.");
-    expect(chunks[0].time - startedAt).toBeGreaterThanOrEqual(300);
+    expect(chunks[0].time - startedAt).toBeGreaterThanOrEqual(650);
   });
 
   it("resets the freshness timer on user stdin activity", async () => {
@@ -629,10 +683,28 @@ describe("claude-pty-wrapper CLI smoke", () => {
       stderr: "freshness max duration must be a positive number of seconds",
     },
     {
-      name: "freshness with wrapper mode",
+      name: "interval with wrapper mode",
       args: ["-p", "--freshness-interval", "1"],
       stderr:
         "--freshness-interval requires passthrough mode and cannot be used with wrapper output mode",
+    },
+    {
+      name: "message with wrapper mode",
+      args: ["-p", "--freshness-message", "wait"],
+      stderr:
+        "--freshness-message requires passthrough mode and cannot be used with wrapper output mode",
+    },
+    {
+      name: "max iterations with wrapper mode",
+      args: ["-p", "--freshness-max-iterations", "1"],
+      stderr:
+        "--freshness-max-iterations requires passthrough mode and cannot be used with wrapper output mode",
+    },
+    {
+      name: "max duration with wrapper mode",
+      args: ["-p", "--freshness-max-duration", "1"],
+      stderr:
+        "--freshness-max-duration requires passthrough mode and cannot be used with wrapper output mode",
     },
   ])("rejects invalid freshness flags: $name", async ({ args, stderr }) => {
     const workspace = await mkdtemp(path.join(os.tmpdir(), "claude-pty-fresh-invalid-work-"));

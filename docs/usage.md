@@ -76,8 +76,8 @@ Emit a single Claude-shaped result object:
 claude-pty-wrapper -p --output-format json "List changed files"
 ```
 
-A bare prompt without wrapper output flags passes through to Claude's normal
-interactive behavior through the wrapper-owned PTY relay.
+A bare prompt without wrapper output flags runs Claude interactively through the
+wrapper-owned PTY relay.
 
 Resume an existing Claude session:
 
