@@ -50,12 +50,35 @@ export function spawnPty(options: PtyRunOptions): PtyHandle {
       proc.resize(cols, rows);
     },
     kill(signal) {
-      proc.kill(signal);
+      killPtyProcessGroup(proc, signal);
     },
     waitForExit() {
       return exitPromise;
     },
   };
+}
+
+function killPtyProcessGroup(proc: pty.IPty, signal?: string): void {
+  if (process.platform === "win32") {
+    proc.kill(signal);
+    return;
+  }
+  try {
+    // forkpty children are session/process-group leaders on Unix. Claude's
+    // stdio MCP servers inherit that process group, so group signaling is what
+    // releases every process that may still hold the PTY slave open.
+    process.kill(-proc.pid, signal ?? "SIGHUP");
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      (error.code === "ESRCH" || error.code === "EINVAL")
+    ) {
+      proc.kill(signal);
+      return;
+    }
+    throw error;
+  }
 }
 
 export function openRawPtyLog(path: string | undefined): WriteStream | null {
