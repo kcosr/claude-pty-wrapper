@@ -23,6 +23,7 @@ interface RunCliOptions {
   env?: Record<string, string | undefined>;
   reject?: boolean;
   input?: string | Buffer;
+  timeoutMs?: number;
   timedInput?: TimedInput[];
 }
 
@@ -37,6 +38,7 @@ export async function runCli(args: string[], options: RunCliOptions): Promise<Cl
         ...process.env,
         ...options.env,
       },
+      timeout: options.timeoutMs,
     });
     return { stdout, stderr, exitCode: 0 };
   } catch (error) {
@@ -44,7 +46,10 @@ export async function runCli(args: string[], options: RunCliOptions): Promise<Cl
       return {
         stdout: String((error as { stdout?: string }).stdout ?? ""),
         stderr: String((error as { stderr?: string }).stderr ?? ""),
-        exitCode: Number((error as { code?: number }).code ?? 1),
+        exitCode:
+          typeof (error as { code?: unknown }).code === "number"
+            ? (error as { code: number }).code
+            : 1,
       };
     }
     throw error;

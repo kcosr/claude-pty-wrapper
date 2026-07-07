@@ -83,6 +83,44 @@ describe("claude-pty-wrapper CLI smoke", () => {
     ]);
   });
 
+  it("reaps stdio child processes that keep the PTY slave open during teardown", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "claude-pty-leak-work-"));
+    const home = await mkdtemp(path.join(os.tmpdir(), "claude-pty-leak-home-"));
+    const fakeClaude = await createFakeClaudeBin();
+    const sessionId = "84b319df-cf48-489b-b8b0-7c6ad8f962fa";
+    let leakedPid: number | null = null;
+    await writeFile(fakeClaude.modePath, "leak-stdio-child\n", "utf8");
+
+    try {
+      const result = await runCli(
+        [
+          "--claude-bin",
+          fakeClaude.binPath,
+          "--cwd",
+          workspace,
+          "--session-id",
+          sessionId,
+          "-p",
+          "Complete and leak a child",
+        ],
+        { cwd: workspace, env: { HOME: home }, reject: false, timeoutMs: 2_000 },
+      );
+
+      leakedPid = await readPidFile(fakeClaude.leakedChildPidPath);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe("first answer\n\nsecond answer\n");
+      await waitFor(async () =>
+        (await fileText(fakeClaude.leakedChildSignalPath)).includes("MCP_SIGTERM"),
+      );
+      await waitFor(async () => !(await pidIsAlive(leakedPid)));
+    } finally {
+      leakedPid ??= await readPidFile(fakeClaude.leakedChildPidPath);
+      if (leakedPid !== null) {
+        killIfAlive(leakedPid);
+      }
+    }
+  });
+
   it("emits raw appended session JSONL records", async () => {
     const workspace = await mkdtemp(path.join(os.tmpdir(), "claude-pty-jsonl-work-"));
     const home = await mkdtemp(path.join(os.tmpdir(), "claude-pty-jsonl-home-"));
@@ -741,4 +779,53 @@ async function readStdinLog(path: string): Promise<StdinLogEntry[]> {
     }
     throw error;
   }
+}
+
+async function readPidFile(path: string): Promise<number | null> {
+  const text = await fileText(path);
+  const pid = Number(text.trim());
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
+async function fileText(path: string): Promise<string> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return "";
+    }
+    throw error;
+  }
+}
+
+async function pidIsAlive(pid: number | null): Promise<boolean> {
+  if (pid === null) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ESRCH") {
+      return false;
+    }
+    return true;
+  }
+}
+
+function killIfAlive(pid: number): void {
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {}
+}
+
+async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 1_000): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  expect(await predicate()).toBe(true);
 }

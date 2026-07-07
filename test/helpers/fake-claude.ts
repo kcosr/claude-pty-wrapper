@@ -4,6 +4,8 @@ import path from "node:path";
 
 export interface FakeClaudeBin {
   binPath: string;
+  leakedChildPidPath: string;
+  leakedChildSignalPath: string;
   logPath: string;
   modePath: string;
   signalPath: string;
@@ -13,6 +15,8 @@ export interface FakeClaudeBin {
 export async function createFakeClaudeBin(): Promise<FakeClaudeBin> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "fake-claude-bin-"));
   const binPath = path.join(dir, "claude");
+  const leakedChildPidPath = path.join(dir, "leaked-child.pid");
+  const leakedChildSignalPath = path.join(dir, "leaked-child-signal.txt");
   const logPath = path.join(dir, "invocation.json");
   const modePath = path.join(dir, "mode.txt");
   const signalPath = path.join(dir, "signal.txt");
@@ -20,17 +24,20 @@ export async function createFakeClaudeBin(): Promise<FakeClaudeBin> {
   await writeFile(
     binPath,
     `#!/usr/bin/env node
+import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, statSync, writeFileSync, appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 const logPath = ${JSON.stringify(logPath)};
+const leakedChildPidPath = ${JSON.stringify(leakedChildPidPath)};
+const leakedChildSignalPath = ${JSON.stringify(leakedChildSignalPath)};
 const modePath = ${JSON.stringify(modePath)};
 const signalPath = ${JSON.stringify(signalPath)};
 const stdinLogPath = ${JSON.stringify(stdinLogPath)};
 const args = process.argv.slice(2);
 const mode = readFileSync(modePath, "utf8").trim();
-const cwd = process.cwd();
+const cwd = process.env.PWD ?? process.cwd();
 const sessionArg = valueAfter("--session-id");
 const resumeArg = valueAfter("--resume") ?? valueAfter("-r");
 const sessionId = resumeArg ?? sessionArg;
@@ -114,10 +121,31 @@ if (mode === "passthrough") {
     for (const line of lines) {
       appendFileSync(sessionPath, JSON.stringify(line) + "\\n");
     }
-    if (mode === "exit") {
+    if (mode === "leak-stdio-child") {
+      const child = spawn(process.execPath, [
+        "-e",
+        ${JSON.stringify(`
+const { appendFileSync } = require("node:fs");
+const signalPath = process.argv[1];
+process.on("SIGHUP", () => {});
+process.on("SIGTERM", () => {
+  appendFileSync(signalPath, "MCP_SIGTERM\\n");
+  process.exit(0);
+});
+setInterval(() => {}, 1000);
+`)},
+        leakedChildSignalPath,
+      ], { stdio: "inherit" });
+      if (child.pid === undefined) {
+        throw new Error("failed to spawn leaked stdio child");
+      }
+      writeFileSync(leakedChildPidPath, String(child.pid) + "\\n");
+      setInterval(() => {}, 1000);
+    } else if (mode === "exit") {
       process.exit(0);
+    } else {
+      setInterval(() => {}, 1000);
     }
-    setInterval(() => {}, 1000);
   }
 }
 
@@ -147,5 +175,13 @@ function statMaybe(path) {
   );
   await chmod(binPath, 0o755);
   await writeFile(modePath, "hold\n", "utf8");
-  return { binPath, logPath, modePath, signalPath, stdinLogPath };
+  return {
+    binPath,
+    leakedChildPidPath,
+    leakedChildSignalPath,
+    logPath,
+    modePath,
+    signalPath,
+    stdinLogPath,
+  };
 }
