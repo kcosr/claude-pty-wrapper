@@ -110,6 +110,51 @@ if (mode === "passthrough") {
       { type: "assistant", isSidechain: false, sessionId, timestamp: new Date().toISOString(), message: { role: "assistant", content: [{ type: "text", text: resumeArg ? "done" : "second answer" }] } },
       { type: "system", subtype: "turn_duration", isSidechain: false, sessionId, timestamp: new Date().toISOString(), durationMs: 25 },
     ];
+    let delayedFlushed = false;
+    const flushDelayedSessionAndExit = () => {
+      if (delayedFlushed) {
+        return;
+      }
+      delayedFlushed = true;
+      for (const line of lines) {
+        appendFileSync(sessionPath, JSON.stringify(line) + "\\n");
+      }
+      process.exit(0);
+    };
+    const writePtyOnlyTranscript = (text) => {
+      process.stdout.write("[Accessible screen reader mode: on]\\n");
+      setTimeout(() => {
+        process.stdout.write(text);
+        process.stdout.write("\\x1b]133;C\\x07\\x1b]133;D\\x07");
+      }, 25);
+    };
+    if (mode === "delayed-session-file") {
+      writePtyOnlyTranscript("claude: first answer\\nsecond answer\\nrunning stop hooks… 0/2\\n");
+      process.stdin.on("data", (chunk) => {
+        if (chunk.includes(0x04)) {
+          flushDelayedSessionAndExit();
+        }
+      });
+      process.stdin.on("end", flushDelayedSessionAndExit);
+      process.on("SIGTERM", flushDelayedSessionAndExit);
+      setInterval(() => {}, 1000);
+    } else if (mode === "pty-only") {
+      writePtyOnlyTranscript("claude: first answer\\nsecond answer\\nScurrying…   ( 1s  ·  96 tokens  ·  thinking )\\nrunning stop hooks… 0/2\\n");
+      process.stdin.on("data", (chunk) => {
+        if (chunk.includes(0x04)) {
+          process.exit(0);
+        }
+      });
+      setInterval(() => {}, 1000);
+    } else if (mode === "pty-only-tool") {
+      writePtyOnlyTranscript("tool: Bash (printf TOOL_OUT)\\nTOOL_OUT\\nclaude: final answer\\nFlambéing…   ( 4s  ·  64 tokens  ·  thinking with high effort )\\nrunning stop hooks… 0/2\\n");
+      process.stdin.on("data", (chunk) => {
+        if (chunk.includes(0x04)) {
+          process.exit(0);
+        }
+      });
+      setInterval(() => {}, 1000);
+    } else {
     const offsetBefore = statMaybe(sessionPath);
     for (const line of lines) {
       appendFileSync(sessionPath, JSON.stringify(line) + "\\n");
@@ -118,6 +163,7 @@ if (mode === "passthrough") {
       process.exit(0);
     }
     setInterval(() => {}, 1000);
+    }
   }
 }
 

@@ -100,7 +100,6 @@ async function delay(ms: number, signal: AbortSignal): Promise<void> {
       resolve();
     };
     signal.addEventListener("abort", onAbort, { once: true });
-    timeout.unref();
   }).finally(() => {
     if (onAbort !== null) {
       signal.removeEventListener("abort", onAbort);

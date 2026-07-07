@@ -33,12 +33,23 @@ Text mode is the default output mode. It prints assistant text blocks from the
 session JSONL file and ignores tool calls, tool results, sidechains, and user
 messages.
 
+Wrapper-managed output prefers Claude's durable session JSONL. For Claude
+versions that flush that file only after the interactive turn exits, the wrapper
+asks Claude for screen-reader-friendly PTY output, observes Claude's
+turn-completion terminal marker, exits the PTY cleanly, then reads the flushed
+session records. If no session records are written, text, JSON, and stream JSON
+output fall back to the final assistant block in the screen-reader PTY stream.
+
 ```bash
 claude-pty-wrapper --session-jsonl "Summarize this repository"
 ```
 
 `--session-jsonl` streams appended raw Claude JSONL records for the wrapper
-turn. This is useful for diagnostics and downstream tooling.
+turn. On Claude versions that flush session JSONL only when the interactive PTY
+exits, those raw records are emitted after the wrapper observes PTY turn
+completion and closes Claude cleanly. Unlike text, JSON, and stream JSON modes,
+raw session JSONL cannot fall back to PTY text when Claude writes no session
+records. This is useful for diagnostics and downstream tooling.
 
 ```bash
 claude-pty-wrapper -p --output-format stream-json "Summarize this repository"

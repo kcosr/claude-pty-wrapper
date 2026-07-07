@@ -47,6 +47,15 @@ session records into a legacy-like stream:
   ignores it because durable session files do not contain runtime partial
   message deltas.
 
+Some Claude versions flush durable session records only after the interactive
+PTY session exits. In those cases, wrapper mode observes Claude's PTY
+turn-completion marker, closes Claude cleanly, then translates the flushed
+session records. If Claude writes no durable session records for the completed
+turn, stream-json mode falls back to the final assistant block in the
+screen-reader PTY stream and emits a minimal `system`, `assistant`, and `result`
+sequence. Durable records remain the preferred source because they preserve tool
+calls, tool results, reasoning blocks, and richer metadata.
+
 The translation is compatibility-oriented, not byte-for-byte identical. The
 wrapper cannot synthesize data that is not present in the durable session file,
 such as rate-limit metadata, exact API timings, full cost accounting, or every

@@ -10,6 +10,10 @@
 
 ### Fixed
 
+- Fixed wrapper `-p` output with Claude versions that delay or omit durable
+  session JSONL, including a PTY transcript fallback that trims transient TUI
+  spinner/status frames.
+
 ### Removed
 
 ## [0.2.0] - 2026-05-18

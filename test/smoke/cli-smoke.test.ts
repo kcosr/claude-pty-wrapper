@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -45,7 +45,7 @@ describe("claude-pty-wrapper CLI smoke", () => {
         "-p",
         "Summarize this repository",
       ],
-      { cwd: workspace, env: { HOME: home } },
+      { cwd: workspace, env: { HOME: home }, timeoutMs: 10_000 },
     );
 
     expect(result.exitCode).toBe(0);
@@ -53,10 +53,11 @@ describe("claude-pty-wrapper CLI smoke", () => {
     const invocation = JSON.parse(await readFile(fakeClaude.logPath, "utf8"));
     expect(invocation.isTTY).toBe(true);
     expect(invocation.stdinIsTTY).toBe(true);
-    expect(invocation.cwd).toBe(workspace);
+    expect(invocation.cwd).toBe(await realpath(workspace));
     expect(invocation.args).toEqual([
       "--session-id",
       sessionId,
+      "--ax-screen-reader",
       "--model",
       "sonnet",
       "--effort",
@@ -81,6 +82,124 @@ describe("claude-pty-wrapper CLI smoke", () => {
       "--",
       "Summarize this repository",
     ]);
+  });
+
+  it("completes when Claude flushes the session file only after PTY turn completion", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "claude-pty-delayed-work-"));
+    const home = await mkdtemp(path.join(os.tmpdir(), "claude-pty-delayed-home-"));
+    const fakeClaude = await createFakeClaudeBin();
+    const sessionId = "d51afd62-57c8-4f08-ad09-05f9846212bc";
+    await writeFile(fakeClaude.modePath, "delayed-session-file\n", "utf8");
+
+    const result = await runCli(
+      [
+        "--claude-bin",
+        fakeClaude.binPath,
+        "--cwd",
+        workspace,
+        "--session-id",
+        sessionId,
+        "--timeout",
+        "2",
+        "-p",
+        "Summarize this repository",
+      ],
+      { cwd: workspace, env: { HOME: home }, timeoutMs: 10_000 },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("first answer\n\nsecond answer\n");
+    const invocation = JSON.parse(await readFile(fakeClaude.logPath, "utf8"));
+    expect(invocation.args).toContain("--ax-screen-reader");
+  });
+
+  it("falls back to PTY assistant text when no session file is written", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "claude-pty-pty-only-work-"));
+    const home = await mkdtemp(path.join(os.tmpdir(), "claude-pty-pty-only-home-"));
+    const fakeClaude = await createFakeClaudeBin();
+    const sessionId = "5da9ecad-1c81-47ec-b348-8d0a1be56efa";
+    await writeFile(fakeClaude.modePath, "pty-only\n", "utf8");
+
+    const result = await runCli(
+      [
+        "--claude-bin",
+        fakeClaude.binPath,
+        "--cwd",
+        workspace,
+        "--session-id",
+        sessionId,
+        "--timeout",
+        "2",
+        "-p",
+        "Summarize this repository",
+      ],
+      { cwd: workspace, env: { HOME: home }, timeoutMs: 10_000 },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("first answer\nsecond answer\n");
+  });
+
+  it("falls back to PTY assistant text for json output when no session file is written", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "claude-pty-pty-json-work-"));
+    const home = await mkdtemp(path.join(os.tmpdir(), "claude-pty-pty-json-home-"));
+    const fakeClaude = await createFakeClaudeBin();
+    const sessionId = "e617cb62-d0f5-4660-9d1b-4d6b7c380b2d";
+    await writeFile(fakeClaude.modePath, "pty-only\n", "utf8");
+
+    const result = await runCli(
+      [
+        "--claude-bin",
+        fakeClaude.binPath,
+        "--cwd",
+        workspace,
+        "--session-id",
+        sessionId,
+        "--timeout",
+        "2",
+        "-p",
+        "--output-format",
+        "json",
+        "Summarize this repository",
+      ],
+      { cwd: workspace, env: { HOME: home }, timeoutMs: 10_000 },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      type: "result",
+      subtype: "success",
+      result: "first answer\nsecond answer",
+      session_id: sessionId,
+      terminal_reason: "completed",
+    });
+  });
+
+  it("ignores tool and status output when falling back to PTY assistant text", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "claude-pty-pty-tool-work-"));
+    const home = await mkdtemp(path.join(os.tmpdir(), "claude-pty-pty-tool-home-"));
+    const fakeClaude = await createFakeClaudeBin();
+    const sessionId = "c264be02-bb19-4d49-b837-cb0f8e355f32";
+    await writeFile(fakeClaude.modePath, "pty-only-tool\n", "utf8");
+
+    const result = await runCli(
+      [
+        "--claude-bin",
+        fakeClaude.binPath,
+        "--cwd",
+        workspace,
+        "--session-id",
+        sessionId,
+        "--timeout",
+        "2",
+        "-p",
+        "Use a tool",
+      ],
+      { cwd: workspace, env: { HOME: home }, timeoutMs: 10_000 },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("final answer\n");
   });
 
   it("emits raw appended session JSONL records", async () => {
@@ -156,7 +275,7 @@ describe("claude-pty-wrapper CLI smoke", () => {
     expect(records[0]).toMatchObject({
       type: "system",
       subtype: "init",
-      cwd: workspace,
+      cwd: await realpath(workspace),
       session_id: sessionId,
     });
     expect(records[2]).toMatchObject({
@@ -231,7 +350,7 @@ describe("claude-pty-wrapper CLI smoke", () => {
     const home = await mkdtemp(path.join(os.tmpdir(), "claude-pty-resume-home-"));
     const fakeClaude = await createFakeClaudeBin();
     const sessionId = "370ac738-80f4-4d5c-9657-03f6b349ac1a";
-    const sessionPath = testClaudeSessionFilePath(home, workspace, sessionId);
+    const sessionPath = testClaudeSessionFilePath(home, await realpath(workspace), sessionId);
     await mkdir(path.dirname(sessionPath), { recursive: true });
     await writeFile(
       sessionPath,
