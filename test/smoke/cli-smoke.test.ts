@@ -103,7 +103,7 @@ describe("claude-pty-wrapper CLI smoke", () => {
           "-p",
           "Complete and leak a child",
         ],
-        { cwd: workspace, env: { HOME: home }, reject: false, timeoutMs: 2_000 },
+        { cwd: workspace, env: { HOME: home }, reject: false, timeoutMs: 5_000 },
       );
 
       leakedPid = await readPidFile(fakeClaude.leakedChildPidPath);

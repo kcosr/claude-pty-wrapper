@@ -11,7 +11,7 @@
 ### Fixed
 
 - Fixed headless `-p` teardown hangs and leaked stdio MCP server processes by
-  signaling the Unix PTY process group during cleanup.
+  signaling the Unix PTY process group during cleanup. (#3)
 
 ### Removed
 
